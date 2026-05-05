@@ -91,7 +91,13 @@ async def vision_loop(camera_index: int) -> None:
             await asyncio.sleep(0.1)
             continue
 
-        small = cv2.resize(frame, (INFERENCE_SIZE, INFERENCE_SIZE))
+        # Center-crop landscape to 9:16 portrait — frontend shows the same crop
+        fh, fw = frame.shape[:2]
+        crop_w = int(fh * 9 / 16)
+        x0 = (fw - crop_w) // 2
+        portrait_frame = frame[:, x0:x0 + crop_w]
+
+        small = cv2.resize(portrait_frame, (INFERENCE_SIZE, INFERENCE_SIZE))
 
         subjects, faces, horizon = await asyncio.gather(
             asyncio.to_thread(person_det.detect, small),
@@ -115,7 +121,7 @@ async def vision_loop(camera_index: int) -> None:
 
         if capture["should_capture"]:
             filename = CAPTURE_DIR / f"capture_{int(time.time()*1000)}.jpg"
-            await asyncio.to_thread(cv2.imwrite, str(filename), frame)
+            await asyncio.to_thread(cv2.imwrite, str(filename), portrait_frame)
             print(f"[capture] saved {filename}")
 
         await broadcast({

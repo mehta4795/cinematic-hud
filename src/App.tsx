@@ -9,8 +9,11 @@ export default function App() {
 
   return (
     <div className="w-screen h-screen bg-black flex items-center justify-center overflow-hidden">
-      {/* Landscape viewport — matches camera feed aspect ratio sent to backend */}
-      <div className="relative w-full h-full overflow-hidden">
+      {/* Portrait viewport — 9:16 aspect ratio, matches backend portrait crop */}
+      <div
+        className="relative overflow-hidden"
+        style={{ height: '100%', aspectRatio: '9 / 16' }}
+      >
         <CameraSelector selectedId={deviceId} onSelect={setDeviceId} />
         <CameraFeed deviceId={deviceId} />
         <OverlayCanvas />

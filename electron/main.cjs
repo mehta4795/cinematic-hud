@@ -6,7 +6,7 @@ const os = require('os')
 function createWindow() {
   const win = new BrowserWindow({
     width: 1600,
-    height: 900,
+    height: 1000,
     backgroundColor: '#000000',
     autoHideMenuBar: true,
     webPreferences: {
