@@ -13,10 +13,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pathlib
 import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Set
+
+CAPTURE_DIR = pathlib.Path.home() / "Downloads" / "capture"
+CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 
 import cv2
 import uvicorn
@@ -108,6 +112,11 @@ async def vision_loop(camera_index: int) -> None:
 
         guidance = guidance_engine.generate(all_issues, all_strengths, scores, scene_type)
         capture  = auto_capture.update(scores, subjects, horizon)
+
+        if capture["should_capture"]:
+            filename = CAPTURE_DIR / f"capture_{int(time.time()*1000)}.jpg"
+            await asyncio.to_thread(cv2.imwrite, str(filename), frame)
+            print(f"[capture] saved {filename}")
 
         await broadcast({
             "frame":             frame_count,
