@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import { useAnimationFrame } from '../hooks/useAnimationFrame'
 import type { OverlayState } from '../types/overlay'
 import { lerpVec2, lerp } from '../types/overlay'
@@ -14,12 +14,28 @@ import { drawVignette } from '../overlays/Vignette'
 import { drawCinematicBars } from '../overlays/CinematicBars'
 import { drawCaptureSuccess } from '../overlays/CaptureSuccess'
 import { useVisionSocket } from '../websocket/useVisionSocket'
+import {
+  playSubjectLock,
+  playCapturePulse,
+  playShutter,
+  playHeroActivate,
+  playHeroDeactivate,
+} from '../audio/sounds'
 
+// Base constants — Hero Mode overrides these
 const ZOOM_BASE   = 1.05
 const ZOOM_ACTIVE = 1.15
 const ZOOM_HIGH   = 1.22
 const MAX_SHIFT_X = 32
 const MAX_SHIFT_Y = 70
+
+// Hero Mode overrides
+const HERO_ZOOM_ACTIVE = 1.22
+const HERO_ZOOM_HIGH   = 1.35
+const HERO_MAX_SHIFT_X = 48
+const HERO_MAX_SHIFT_Y = 100
+const HERO_REFRAME_T   = 0.025   // faster reframing
+const HERO_SCORE_GATE  = 80      // fires auto-capture more easily
 
 const INITIAL_STATE: OverlayState = {
   focusBox: {
@@ -59,10 +75,24 @@ const INITIAL_STATE: OverlayState = {
 }
 
 export function OverlayCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const stateRef  = useRef<OverlayState>(structuredClone(INITIAL_STATE))
+  const canvasRef  = useRef<HTMLCanvasElement>(null)
+  const stateRef   = useRef<OverlayState>(structuredClone(INITIAL_STATE))
+  const heroRef    = useRef(false)
+  const prevRef    = useRef({ focusActive: false, captureReady: false })
 
   useVisionSocket(stateRef)
+
+  // Hero Mode — press H to toggle
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== 'h') return
+      heroRef.current = !heroRef.current
+      if (heroRef.current) playHeroActivate()
+      else playHeroDeactivate()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   useAnimationFrame(delta => {
     const canvas = canvasRef.current
@@ -85,7 +115,8 @@ export function OverlayCanvas() {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-    const s = stateRef.current
+    const s    = stateRef.current
+    const hero = heroRef.current
     s.timestamp += delta
 
     // ── Focus box ────────────────────────────────────────────────────────
@@ -127,12 +158,12 @@ export function OverlayCanvas() {
       s.guidanceOpacity = Math.max(0, s.guidanceOpacity - delta * 0.002)
     }
 
-    // ── Capture flash decay (~300ms) ──────────────────────────────────────
+    // ── Capture flash decay ───────────────────────────────────────────────
     if (s.captureFlash > 0) {
       s.captureFlash = Math.max(0, s.captureFlash - delta * 0.004)
     }
 
-    // ── Capture success overlay ───────────────────────────────────────────
+    // ── Capture success ───────────────────────────────────────────────────
     if (s.shouldCapture) {
       s.captureSuccessOpacity = 1.0
       s.captureCount += 1
@@ -142,28 +173,48 @@ export function OverlayCanvas() {
       s.captureSuccessOpacity = Math.max(0, s.captureSuccessOpacity - delta * 0.00055)
     }
 
+    // ── Audio triggers (on state transitions only) ────────────────────────
+    if (s.focusBox.active && !prevRef.current.focusActive) {
+      playSubjectLock()
+    }
+    if (s.captureReady && !prevRef.current.captureReady) {
+      playCapturePulse()
+    }
+    if (s.captureSuccessOpacity === 1.0 && prevRef.current.captureReady) {
+      playShutter()
+    }
+    prevRef.current.focusActive  = s.focusBox.active
+    prevRef.current.captureReady = s.captureReady
+
     // ── Smart Reframing ───────────────────────────────────────────────────
+    const maxX = hero ? HERO_MAX_SHIFT_X : MAX_SHIFT_X
+    const maxY = hero ? HERO_MAX_SHIFT_Y : MAX_SHIFT_Y
+    const reframeT = hero ? HERO_REFRAME_T : 0.012
+
     if (s.focusBox.active) {
       const idealX = w * (s.sceneType === 'landscape' ? 0.5 : 0.36)
       const idealY = h * 0.38
       const subjectX = s.focusBox.current.x * w
       const subjectY = s.focusBox.current.y * h
-      s.reframeTargetX = Math.max(-MAX_SHIFT_X, Math.min(MAX_SHIFT_X, idealX - subjectX))
-      s.reframeTargetY = Math.max(-MAX_SHIFT_Y, Math.min(MAX_SHIFT_Y, idealY - subjectY))
+      s.reframeTargetX = Math.max(-maxX, Math.min(maxX, idealX - subjectX))
+      s.reframeTargetY = Math.max(-maxY, Math.min(maxY, idealY - subjectY))
     } else {
       s.reframeTargetX = 0
       s.reframeTargetY = 0
     }
-    s.reframeX = lerp(s.reframeX, s.reframeTargetX, 0.012)
-    s.reframeY = lerp(s.reframeY, s.reframeTargetY, 0.012)
+    s.reframeX = lerp(s.reframeX, s.reframeTargetX, reframeT)
+    s.reframeY = lerp(s.reframeY, s.reframeTargetY, reframeT)
 
     // ── Cinematic zoom ────────────────────────────────────────────────────
+    const zoomActive = hero ? HERO_ZOOM_ACTIVE : ZOOM_ACTIVE
+    const zoomHigh   = hero ? HERO_ZOOM_HIGH   : ZOOM_HIGH
+    const scoreGate  = hero ? HERO_SCORE_GATE  : 80
+
     s.zoomTarget = s.focusBox.active
-      ? (s.scoreCurrent >= 80 ? ZOOM_HIGH : ZOOM_ACTIVE)
+      ? (s.scoreCurrent >= scoreGate ? zoomHigh : zoomActive)
       : ZOOM_BASE
     s.zoomLevel = lerp(s.zoomLevel, s.zoomTarget, 0.0008)
 
-    // Apply transform directly to video DOM element each frame
     const video = canvas.parentElement?.querySelector('video') as HTMLVideoElement | null
     if (video) {
       video.style.transform = `translate(${s.reframeX}px, ${s.reframeY}px) scale(${s.zoomLevel})`
@@ -174,7 +225,7 @@ export function OverlayCanvas() {
     ctx.clearRect(0, 0, w, h)
 
     if (s.showGrid) drawGrid(ctx, w, h)
-    drawVignette(ctx, w, h, s.focusBox.active ? 0.7 : 0.2)
+    drawVignette(ctx, w, h, s.focusBox.active ? (hero ? 0.9 : 0.7) : 0.2)
     drawHorizonGuide(ctx, s.horizonCurrent, w, h)
     drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
     drawFocusBox(
@@ -190,6 +241,20 @@ export function OverlayCanvas() {
     drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
     drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
+
+    // Hero Mode badge
+    if (hero) {
+      ctx.save()
+      ctx.textBaseline = 'top'
+      ctx.textAlign = 'left'
+      ctx.fillStyle = 'rgba(0, 255, 120, 0.9)'
+      ctx.shadowColor = 'rgba(0, 255, 120, 0.5)'
+      ctx.shadowBlur = 8
+      ctx.font = '700 8px "SF Mono", "Courier New", monospace'
+      ctx.fillText('◈ HERO MODE', 14, 14)
+      ctx.restore()
+    }
+
     drawCaptureFlash(ctx, s.captureFlash, w, h)
   })
 
