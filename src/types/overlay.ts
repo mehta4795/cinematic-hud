@@ -3,11 +3,22 @@ export interface Vec2 {
   y: number
 }
 
+export interface FaceData {
+  cx: number
+  cy: number
+  w: number
+  h: number
+  smoothCx: number
+  smoothCy: number
+}
+
 export interface OverlayState {
   focusBox: {
     target: Vec2
     current: Vec2
-    size: number
+    targetSize: number
+    currentSize: number
+    active: boolean     // true when AI has a detected subject
   }
   hudText: {
     text: string
@@ -16,6 +27,17 @@ export interface OverlayState {
   }
   showGrid: boolean
   timestamp: number
+
+  // Phase 2 — AI-driven
+  faces: FaceData[]
+  horizonTarget: number
+  horizonCurrent: number
+  scoreTarget: number
+  scoreCurrent: number
+  guidance: string[]
+  guidanceText: string
+  guidanceOpacity: number
+  aiConnected: boolean
 }
 
 export function lerp(a: number, b: number, t: number): number {
