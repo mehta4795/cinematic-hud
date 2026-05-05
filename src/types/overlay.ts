@@ -55,6 +55,16 @@ export interface OverlayState {
   shouldCapture: boolean
   captureFlash: number
   bestScore: number
+
+  // Phase 4
+  reframeX: number
+  reframeY: number
+  reframeTargetX: number
+  reframeTargetY: number
+  zoomLevel: number
+  zoomTarget: number
+  captureSuccessOpacity: number
+  captureCount: number
 }
 
 export function lerp(a: number, b: number, t: number): number {
