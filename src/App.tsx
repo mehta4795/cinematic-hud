@@ -9,8 +9,8 @@ export default function App() {
 
   return (
     <div className="w-screen h-screen bg-black flex items-center justify-center overflow-hidden">
-      {/* Mobile portrait viewport — iPhone 14 dimensions (390×844) */}
-      <div className="relative overflow-hidden" style={{ width: 390, height: 844 }}>
+      {/* Landscape viewport — matches camera feed aspect ratio sent to backend */}
+      <div className="relative w-full h-full overflow-hidden">
         <CameraSelector selectedId={deviceId} onSelect={setDeviceId} />
         <CameraFeed deviceId={deviceId} />
         <OverlayCanvas />
