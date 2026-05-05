@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CameraSelector } from './components/CameraSelector'
 import { CameraFeed } from './components/CameraFeed'
 import { OverlayCanvas } from './components/OverlayCanvas'
+import { CaptureButton } from './components/CaptureButton'
 
 export default function App() {
   const [deviceId, setDeviceId] = useState('')
@@ -13,6 +14,7 @@ export default function App() {
         <CameraSelector selectedId={deviceId} onSelect={setDeviceId} />
         <CameraFeed deviceId={deviceId} />
         <OverlayCanvas />
+        <CaptureButton />
       </div>
     </div>
   )

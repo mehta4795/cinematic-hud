@@ -1,5 +1,7 @@
-const { app, BrowserWindow, session } = require('electron')
+const { app, BrowserWindow, session, ipcMain } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const os = require('os')
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -10,6 +12,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   })
 
@@ -34,6 +37,17 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow)
+
+const captureDir = path.join(os.homedir(), 'Downloads', 'capture')
+fs.mkdirSync(captureDir, { recursive: true })
+
+ipcMain.handle('save-capture', (_event, dataUrl) => {
+  const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '')
+  const filename = path.join(captureDir, `capture_${Date.now()}.jpg`)
+  fs.writeFileSync(filename, Buffer.from(base64, 'base64'))
+  console.log('[capture] saved', filename)
+  return filename
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
