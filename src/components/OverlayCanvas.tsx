@@ -8,6 +8,8 @@ import { drawHudText } from '../overlays/HudText'
 import { drawHorizonGuide } from '../overlays/HorizonGuide'
 import { drawFaceGuides } from '../overlays/FaceGuide'
 import { drawScoreDisplay } from '../overlays/ScoreDisplay'
+import { drawAutoCaptureIndicator } from '../overlays/AutoCaptureIndicator'
+import { drawCaptureFlash } from '../overlays/CaptureFlash'
 import { useVisionSocket } from '../websocket/useVisionSocket'
 
 const INITIAL_STATE: OverlayState = {
@@ -21,6 +23,7 @@ const INITIAL_STATE: OverlayState = {
   hudText: { text: 'SCANNING…', opacity: 0, visible: true },
   showGrid: true,
   timestamp: 0,
+  // Phase 2
   faces: [],
   horizonTarget: 0,
   horizonCurrent: 0,
@@ -30,11 +33,18 @@ const INITIAL_STATE: OverlayState = {
   guidanceText: '',
   guidanceOpacity: 0,
   aiConnected: false,
+  // Phase 3
+  sceneType: 'general',
+  scoreBreakdown: { overall: 50, composition: 50, framing: 50, portrait: 50, horizon: 50 },
+  captureReady: false,
+  captureCountdown: 0,
+  shouldCapture: false,
+  captureFlash: 0,
+  bestScore: 0,
 }
 
 export function OverlayCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  // All state lives in a ref — RAF loop reads it, WebSocket hook writes it, no re-renders needed
   const stateRef = useRef<OverlayState>(structuredClone(INITIAL_STATE))
 
   useVisionSocket(stateRef)
@@ -48,10 +58,10 @@ export function OverlayCanvas() {
     const h = canvas.offsetHeight
 
     if (
-      canvas.width !== Math.round(w * dpr) ||
+      canvas.width  !== Math.round(w * dpr) ||
       canvas.height !== Math.round(h * dpr)
     ) {
-      canvas.width = Math.round(w * dpr)
+      canvas.width  = Math.round(w * dpr)
       canvas.height = Math.round(h * dpr)
     }
 
@@ -63,37 +73,34 @@ export function OverlayCanvas() {
     const s = stateRef.current
     s.timestamp += delta
 
-    // ── Focus box ─────────────────────────────────────────────────────────
+    // ── Focus box ───────────────────────────────────────────────────────
     if (s.focusBox.active) {
-      // AI driving: interpolate toward detected subject
       s.focusBox.current = lerpVec2(s.focusBox.current, s.focusBox.target, 0.08)
       s.focusBox.currentSize = lerp(s.focusBox.currentSize, s.focusBox.targetSize, 0.08)
     } else {
-      // Fallback: slow sinusoidal drift so the HUD feels alive
       const drift = 0.015 * Math.sin(s.timestamp * 0.0004)
-      s.focusBox.target = { x: 0.5 + drift, y: 0.44 + drift * 0.4 }
+      s.focusBox.target  = { x: 0.5 + drift, y: 0.44 + drift * 0.4 }
       s.focusBox.current = lerpVec2(s.focusBox.current, s.focusBox.target, 0.04)
     }
 
-    // ── HUD text opacity ──────────────────────────────────────────────────
+    // ── HUD text ────────────────────────────────────────────────────────
     if (s.hudText.visible && s.hudText.opacity < 1) {
       s.hudText.opacity = Math.min(1, s.hudText.opacity + delta * 0.0007)
     }
 
-    // ── Horizon & score smoothing ─────────────────────────────────────────
+    // ── Horizon + score smoothing ───────────────────────────────────────
     s.horizonCurrent = lerp(s.horizonCurrent, s.horizonTarget, 0.05)
-    s.scoreCurrent = lerp(s.scoreCurrent, s.scoreTarget, 0.03)
+    s.scoreCurrent   = lerp(s.scoreCurrent,   s.scoreTarget,   0.03)
 
-    // ── Face position smoothing ───────────────────────────────────────────
+    // ── Face smoothing ──────────────────────────────────────────────────
     for (const face of s.faces) {
       face.smoothCx = lerp(face.smoothCx, face.cx, 0.08)
       face.smoothCy = lerp(face.smoothCy, face.cy, 0.08)
     }
 
-    // ── Guidance text cross-fade ──────────────────────────────────────────
+    // ── Guidance cross-fade ─────────────────────────────────────────────
     const newGuidance = s.guidance[0] ?? ''
     if (newGuidance !== s.guidanceText) {
-      // Fade out current text before switching
       if (s.guidanceOpacity > 0) {
         s.guidanceOpacity = Math.max(0, s.guidanceOpacity - delta * 0.004)
       } else {
@@ -105,19 +112,23 @@ export function OverlayCanvas() {
       s.guidanceOpacity = Math.max(0, s.guidanceOpacity - delta * 0.002)
     }
 
-    // ── Draw ──────────────────────────────────────────────────────────────
+    // ── Capture flash decay (~300ms) ────────────────────────────────────
+    if (s.captureFlash > 0) {
+      s.captureFlash = Math.max(0, s.captureFlash - delta * 0.004)
+    }
+    s.shouldCapture = false
+
+    // ── Draw ─────────────────────────────────────────────────────────────
     ctx.clearRect(0, 0, w, h)
 
     if (s.showGrid) drawGrid(ctx, w, h)
     drawHorizonGuide(ctx, s.horizonCurrent, w, h)
-    drawFocusBox(
-      ctx,
-      { x: s.focusBox.current.x * w, y: s.focusBox.current.y * h },
-      s.focusBox.currentSize,
-    )
+    drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
+    drawFocusBox(ctx, { x: s.focusBox.current.x * w, y: s.focusBox.current.y * h }, s.focusBox.currentSize)
     drawFaceGuides(ctx, s.faces, w, h)
     drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
-    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, w, h)
+    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
+    drawCaptureFlash(ctx, s.captureFlash, w, h)
   })
 
   return (

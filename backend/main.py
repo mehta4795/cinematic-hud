@@ -1,13 +1,12 @@
 """
 AI Vision Backend — streams detection metadata over WebSocket at ~4 FPS.
-Frontend renders all visuals; this sends coordinates/scores only.
+Frontend renders all visuals; this sends coordinates/scores/guidance only.
 
 Usage:
     python main.py [--camera 0]
+    CAMERA_INDEX=1 python main.py
 
-Camera index: set CAMERA_INDEX env var or pass --camera flag.
-iPhone Continuity Camera is usually index 1 if a built-in FaceTime cam exists.
-Run with --list-cameras to print available cameras.
+Run with --list-cameras to print available camera indices.
 """
 from __future__ import annotations
 
@@ -26,15 +25,21 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from vision.detector import PersonDetector
 from vision.face import FaceDetector
 from vision.horizon import HorizonDetector
-from vision.composition import CompositionAnalyzer
 
-# ── Config ──────────────────────────────────────────────────────────────────
+from intelligence.scene_classifier import classify
+from intelligence.composition_engine import analyze as analyze_composition
+from intelligence.portrait_rules import analyze as analyze_portrait
+from intelligence.scoring_engine import compute as compute_scores
+from intelligence.guidance_engine import GuidanceEngine
+from intelligence.auto_capture import AutoCapture
+
+# ── Config ────────────────────────────────────────────────────────────────
 CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
 TARGET_FPS = 4
 WS_PORT = 8765
 INFERENCE_SIZE = 512
 
-# ── State ────────────────────────────────────────────────────────────────────
+# ── State ─────────────────────────────────────────────────────────────────
 clients: Set[WebSocket] = set()
 
 
@@ -51,13 +56,14 @@ async def broadcast(data: dict) -> None:
     clients.difference_update(dead)
 
 
-# ── Vision loop ───────────────────────────────────────────────────────────────
+# ── Vision loop ───────────────────────────────────────────────────────────
 async def vision_loop(camera_index: int) -> None:
-    print(f"[vision] Initialising detectors…")
+    print("[vision] Initialising detectors…")
     person_det = PersonDetector()
-    face_det = FaceDetector()
+    face_det   = FaceDetector()
     horizon_det = HorizonDetector()
-    composition = CompositionAnalyzer()
+    guidance_engine = GuidanceEngine(stability_frames=4)
+    auto_capture    = AutoCapture(score_threshold=90, stable_frames=4)
 
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
@@ -89,25 +95,44 @@ async def vision_loop(camera_index: int) -> None:
             asyncio.to_thread(horizon_det.detect, small),
         )
 
-        score, guidance = composition.analyze(subjects, faces, horizon)
+        # ── Intelligence layer ────────────────────────────────────────────
+        scene_type   = classify(subjects, faces)
+        composition  = analyze_composition(subjects, faces)
+        portrait     = analyze_portrait(faces, scene_type)
 
-        await broadcast(
-            {
-                "frame": frame_count,
-                "subjects": subjects,
-                "faces": faces,
-                "horizon": horizon,
-                "composition_score": score,
-                "guidance": guidance,
-            }
-        )
+        confidence   = subjects[0]["confidence"] if subjects else 0.0
+        scores       = compute_scores(composition, portrait, horizon, confidence)
+
+        all_issues    = composition["issues"] + portrait["issues"]
+        all_strengths = composition["strengths"] + portrait["strengths"]
+
+        guidance = guidance_engine.generate(all_issues, all_strengths, scores, scene_type)
+        capture  = auto_capture.update(scores, subjects, horizon)
+
+        await broadcast({
+            "frame":             frame_count,
+            "subjects":          subjects,
+            "faces":             faces,
+            "horizon":           horizon,
+            "scene_type":        scene_type,
+            "scores":            scores,
+            "issues":            all_issues,
+            "strengths":         all_strengths,
+            "guidance":          [guidance] if guidance else [],
+            "capture_ready":     capture["capture_ready"],
+            "should_capture":    capture["should_capture"],
+            "capture_countdown": capture["capture_countdown"],
+            "best_score":        capture["best_score"],
+        })
 
         frame_count += 1
         elapsed = time.monotonic() - t0
         await asyncio.sleep(max(0.0, interval - elapsed))
 
+    cap.release()
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
+
+# ── FastAPI app ───────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(vision_loop(CAMERA_INDEX))
@@ -128,7 +153,6 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     clients.add(websocket)
     print(f"[ws] client connected  (total: {len(clients)})")
     try:
-        # Keep alive — client messages are ignored
         async for _ in websocket.iter_text():
             pass
     except WebSocketDisconnect:
@@ -138,7 +162,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         print(f"[ws] client disconnected (total: {len(clients)})")
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────
 def list_cameras(max_test: int = 8) -> None:
     print("Available cameras:")
     for i in range(max_test):
