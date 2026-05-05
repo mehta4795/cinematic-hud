@@ -8,15 +8,14 @@ export function CameraFeed({ deviceId }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    if (!deviceId) return
-
     let stream: MediaStream | null = null
 
+    const videoConstraint = deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      : { width: { ideal: 1920 }, height: { ideal: 1080 } }
+
     navigator.mediaDevices
-      .getUserMedia({
-        video: { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
-      })
+      .getUserMedia({ video: videoConstraint, audio: false })
       .then(s => {
         stream = s
         if (videoRef.current) videoRef.current.srcObject = s

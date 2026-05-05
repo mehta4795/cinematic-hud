@@ -13,6 +13,14 @@ function createWindow() {
     },
   })
 
+  // Both handlers required: check handler answers "already granted?",
+  // request handler handles new requests. Without the check handler,
+  // getUserMedia is silently blocked before it reaches the request handler.
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === 'media') return true
+    return null
+  })
+
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === 'media')
   })
