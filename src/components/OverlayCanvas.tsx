@@ -228,6 +228,11 @@ export function OverlayCanvas() {
     drawVignette(ctx, w, h, s.focusBox.active ? (hero ? 0.9 : 0.7) : 0.2)
     drawHorizonGuide(ctx, s.horizonCurrent, w, h)
     drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
+    // Mirror the video's CSS transform so overlay elements track the visual face position
+    ctx.save()
+    ctx.translate(w / 2 + s.reframeX, h / 2 + s.reframeY)
+    ctx.scale(s.zoomLevel, s.zoomLevel)
+    ctx.translate(-w / 2, -h / 2)
     drawFocusBox(
       ctx,
       { x: s.focusBox.current.x * w, y: s.focusBox.current.y * h },
@@ -237,6 +242,7 @@ export function OverlayCanvas() {
       s.focusBox.active,
     )
     drawFaceGuides(ctx, s.faces, w, h)
+    ctx.restore()
     drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
     drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)

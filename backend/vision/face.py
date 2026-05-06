@@ -20,13 +20,14 @@ class FaceDetector:
         faces = self.cascade.detectMultiScale(
             gray,
             scaleFactor=1.1,
-            minNeighbors=5,
+            minNeighbors=6,
             minSize=(30, 30),
         )
 
         result: list[dict] = []
         if len(faces) > 0:
-            for fx, fy, fw, fh in faces:
+            # Sort largest area first — biggest face is the primary subject
+            for fx, fy, fw, fh in sorted(faces, key=lambda f: f[2] * f[3], reverse=True):
                 result.append(
                     {
                         "x": float(fx) / w,
@@ -36,4 +37,4 @@ class FaceDetector:
                     }
                 )
 
-        return result[:2]
+        return result[:1]

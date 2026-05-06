@@ -98,10 +98,13 @@ async def vision_loop(camera_index: int) -> None:
         portrait_frame = frame[:, x0:x0 + crop_w]
 
         small = cv2.resize(portrait_frame, (INFERENCE_SIZE, INFERENCE_SIZE))
+        # Maintain 9:16 ratio for face detection — squishing to square distorts
+        # face proportions and causes Haar cascade to return small/wrong boxes.
+        face_frame = cv2.resize(portrait_frame, (INFERENCE_SIZE * 9 // 16, INFERENCE_SIZE))
 
         subjects, faces, horizon = await asyncio.gather(
             asyncio.to_thread(person_det.detect, small),
-            asyncio.to_thread(face_det.detect, small),
+            asyncio.to_thread(face_det.detect, face_frame),
             asyncio.to_thread(horizon_det.detect, small),
         )
 

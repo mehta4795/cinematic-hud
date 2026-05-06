@@ -55,7 +55,7 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
         if (msg.subjects.length > 0) {
           const sub = msg.subjects[0]
           s.focusBox.target = { x: sub.x + sub.w / 2, y: sub.y + sub.h / 2 }
-          s.focusBox.targetSize = Math.max(sub.w, sub.h) * 390
+          s.focusBox.targetSize = Math.max(sub.w, sub.h)   // 0–1 normalized; pixels computed in RAF
           s.focusBox.active = true
           s.hudText.text = 'SUBJECT LOCKED'
           s.hudText.visible = true

@@ -7,10 +7,12 @@ export function CaptureButton() {
     const video = document.querySelector('video')
     if (!video) return
 
+    const cropW = Math.round(video.videoHeight * 9 / 16)
+    const x0 = Math.round((video.videoWidth - cropW) / 2)
     const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
+    canvas.width = cropW
     canvas.height = video.videoHeight
-    canvas.getContext('2d')!.drawImage(video, 0, 0)
+    canvas.getContext('2d')!.drawImage(video, x0, 0, cropW, video.videoHeight, 0, 0, cropW, video.videoHeight)
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
 
     setFlash(true)

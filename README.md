@@ -1,73 +1,58 @@
-# React + TypeScript + Vite
+# Cinematic HUD
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An AI-powered camera viewfinder for desktop. Analyses your webcam feed in real time and overlays cinematic guides, subject tracking, composition scoring, and auto-capture.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Real-time person + face detection with animated focus overlay
+- Composition scoring and photography guidance
+- Smart reframing and cinematic zoom
+- Auto-capture when shot quality peaks
+- Hero Mode (`H`) for enhanced tracking and zoom
 
-## React Compiler
+## Prerequisites
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js 18+
+- Python 3.10+
+- Webcam
 
-## Expanding the ESLint configuration
+## Setup
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+**Frontend**
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+**Backend**
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
+
+> YOLOv8 weights (`yolov8n.pt`) download automatically on first run.
+
+## Run
+
+Open two terminals:
+
+```bash
+# Terminal 1 — AI backend
+cd backend && source venv/bin/activate && python main.py
+
+# Terminal 2 — Electron app
+npm run dev
+```
+
+Select your camera from the dropdown in the top-left corner.
+
+## Captures
+
+Photos are saved to `~/Downloads/capture/` — triggered automatically when composition score peaks, or manually via the shutter button.
+
+## Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `H` | Toggle Hero Mode (aggressive zoom + reframe) |

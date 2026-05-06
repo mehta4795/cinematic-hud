@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+
+# ML model weights (download on first run via ultralytics)
+backend/*.pt
+*.pt
