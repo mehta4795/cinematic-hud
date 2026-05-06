@@ -18,6 +18,15 @@ export interface ScoreBreakdown {
   framing: number
   portrait: number
   horizon: number
+  lighting: number
+}
+
+export interface LightingState {
+  exposure: 'underexposed' | 'good' | 'overexposed'
+  faceBrightness: number
+  dynamicRange: 'low' | 'normal' | 'high'
+  backlit: boolean
+  harshShadow: boolean
 }
 
 export interface OverlayState {
@@ -65,6 +74,9 @@ export interface OverlayState {
   zoomTarget: number
   captureSuccessOpacity: number
   captureCount: number
+
+  // Phase 5
+  lighting: LightingState
 }
 
 export function lerp(a: number, b: number, t: number): number {

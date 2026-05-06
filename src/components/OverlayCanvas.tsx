@@ -13,6 +13,7 @@ import { drawCaptureFlash } from '../overlays/CaptureFlash'
 import { drawVignette } from '../overlays/Vignette'
 import { drawCinematicBars } from '../overlays/CinematicBars'
 import { drawCaptureSuccess } from '../overlays/CaptureSuccess'
+import { drawLightingIndicator } from '../overlays/LightingIndicator'
 import { useVisionSocket } from '../websocket/useVisionSocket'
 import {
   playSubjectLock,
@@ -72,6 +73,13 @@ const INITIAL_STATE: OverlayState = {
   zoomTarget: ZOOM_BASE,
   captureSuccessOpacity: 0,
   captureCount: 0,
+  lighting: {
+    exposure: 'good' as const,
+    faceBrightness: 0.5,
+    dynamicRange: 'normal' as const,
+    backlit: false,
+    harshShadow: false,
+  },
 }
 
 interface Props {
@@ -262,6 +270,7 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
     drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
     drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
+    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, h)
     drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
 
     // Hero Mode badge

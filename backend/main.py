@@ -29,6 +29,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from vision.detector import PersonDetector
 from vision.face import FaceDetector
 from vision.horizon import HorizonDetector
+from vision.lighting import LightingAnalyzer
 
 from intelligence.scene_classifier import classify
 from intelligence.composition_engine import analyze as analyze_composition
@@ -63,9 +64,10 @@ async def broadcast(data: dict) -> None:
 # ── Vision loop ───────────────────────────────────────────────────────────
 async def vision_loop(camera_index: int) -> None:
     print("[vision] Initialising detectors…")
-    person_det = PersonDetector()
-    face_det   = FaceDetector()
-    horizon_det = HorizonDetector()
+    person_det      = PersonDetector()
+    face_det        = FaceDetector()
+    horizon_det     = HorizonDetector()
+    lighting_analyzer = LightingAnalyzer()
     guidance_engine = GuidanceEngine(stability_frames=4)
     auto_capture    = AutoCapture(score_threshold=90, stable_frames=4)
 
@@ -98,6 +100,7 @@ async def vision_loop(camera_index: int) -> None:
             asyncio.to_thread(face_det.detect, small),
             asyncio.to_thread(horizon_det.detect, small),
         )
+        lighting = await asyncio.to_thread(lighting_analyzer.analyze, small, faces)
 
         # ── Intelligence layer ────────────────────────────────────────────
         scene_type   = classify(subjects, faces)
@@ -105,9 +108,15 @@ async def vision_loop(camera_index: int) -> None:
         portrait     = analyze_portrait(faces, scene_type)
 
         confidence   = subjects[0]["confidence"] if subjects else 0.0
-        scores       = compute_scores(composition, portrait, horizon, confidence)
+        scores       = compute_scores(composition, portrait, horizon, confidence, lighting)
 
-        all_issues    = composition["issues"] + portrait["issues"]
+        lighting_issues = []
+        if lighting["backlit"]:                          lighting_issues.append("backlit")
+        if lighting["harsh_shadow"]:                     lighting_issues.append("harsh_shadow")
+        if lighting["exposure"] == "underexposed":       lighting_issues.append("underexposed")
+        elif lighting["exposure"] == "overexposed":      lighting_issues.append("overexposed")
+
+        all_issues    = composition["issues"] + portrait["issues"] + lighting_issues
         all_strengths = composition["strengths"] + portrait["strengths"]
 
         guidance = guidance_engine.generate(all_issues, all_strengths, scores, scene_type)
@@ -132,6 +141,7 @@ async def vision_loop(camera_index: int) -> None:
             "should_capture":    capture["should_capture"],
             "capture_countdown": capture["capture_countdown"],
             "best_score":        capture["best_score"],
+            "lighting":          lighting,
         })
 
         frame_count += 1
