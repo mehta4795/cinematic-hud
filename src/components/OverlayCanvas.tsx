@@ -74,11 +74,20 @@ const INITIAL_STATE: OverlayState = {
   captureCount: 0,
 }
 
-export function OverlayCanvas() {
+interface Props {
+  onCapture: (dataUrl: string) => void
+  isReviewing: boolean
+}
+
+export function OverlayCanvas({ onCapture, isReviewing }: Props) {
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const stateRef   = useRef<OverlayState>(structuredClone(INITIAL_STATE))
   const heroRef    = useRef(false)
   const prevRef    = useRef({ focusActive: false, captureReady: false })
+  const onCaptureRef = useRef(onCapture)
+  onCaptureRef.current = onCapture
+  const isReviewingRef = useRef(isReviewing)
+  isReviewingRef.current = isReviewing
 
   useVisionSocket(stateRef)
 
@@ -167,6 +176,19 @@ export function OverlayCanvas() {
     if (s.shouldCapture) {
       s.captureSuccessOpacity = 1.0
       s.captureCount += 1
+
+      if (!isReviewingRef.current) {
+        const video = canvas.parentElement?.querySelector('video') as HTMLVideoElement | null
+        if (video && video.videoWidth > 0) {
+          const snap = document.createElement('canvas')
+          snap.width = video.videoWidth
+          snap.height = video.videoHeight
+          snap.getContext('2d')!.drawImage(video, 0, 0)
+          const dataUrl = snap.toDataURL('image/jpeg', 0.95)
+          window.api.saveCapture(dataUrl)
+          onCaptureRef.current(dataUrl)
+        }
+      }
     }
     s.shouldCapture = false
     if (s.captureSuccessOpacity > 0) {

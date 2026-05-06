@@ -1,9 +1,13 @@
 import { useState, useCallback } from 'react'
 
-export function CaptureButton() {
+interface Props {
+  onCapture: (dataUrl: string) => void
+}
+
+export function CaptureButton({ onCapture }: Props) {
   const [flash, setFlash] = useState(false)
 
-  const handleCapture = useCallback(async () => {
+  const handleCapture = useCallback(() => {
     const video = document.querySelector('video')
     if (!video) return
 
@@ -16,8 +20,9 @@ export function CaptureButton() {
     setFlash(true)
     setTimeout(() => setFlash(false), 150)
 
-    await window.api.saveCapture(dataUrl)
-  }, [])
+    onCapture(dataUrl)
+    window.api.saveCapture(dataUrl)
+  }, [onCapture])
 
   return (
     <>
