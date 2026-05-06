@@ -58,6 +58,16 @@ def analyze(subjects: list[dict], faces: list[dict]) -> dict:
         issues.append("excessive_headroom")
         score -= 10
 
+    # ── Bottom dead space ─────────────────────────────────────────────────
+    # Only flag for medium/full-body shots (not tight headshots)
+    face_area = faces[0]["w"] * faces[0]["h"] if faces else 0
+    if subjects and face_area < 0.15:
+        sub = subjects[0]
+        sub_bottom = sub["y"] + sub["h"]
+        if sub_bottom < 0.60:
+            issues.append("bottom_dead_space")
+            score -= 8
+
     return {
         "score": max(0, min(100, score)),
         "issues": issues,

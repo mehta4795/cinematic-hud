@@ -90,6 +90,11 @@ export interface OverlayState {
   poseLandmarks: PoseLandmark[]
   poseType: string
   poseIssues: string[]
+
+  // Claude analysis
+  claudeAnalysis: { headline: string; topTips: string[] } | null
+  claudeAnalysisOpacity: number
+  claudeAnalysisAge: number
 }
 
 export function lerp(a: number, b: number, t: number): number {

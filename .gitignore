@@ -12,6 +12,18 @@ dist
 dist-ssr
 *.local
 
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+backend/venv/
+backend/.venv/
+
+# ML model weights (large binaries)
+*.pt
+*.pth
+*.onnx
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,9 +1,9 @@
 """
-AI Vision Backend — streams detection metadata over WebSocket at ~4 FPS.
-Frontend renders all visuals; this sends coordinates/scores/guidance only.
+AI Vision Backend — streams JPEG frames + detection metadata over WebSocket at ~4 FPS.
+Backend owns the camera exclusively; frontend displays frames received via WebSocket.
 
 Usage:
-    python main.py [--camera 0]
+    python main.py [--camera 1]
     CAMERA_INDEX=1 python main.py
 
 Run with --list-cameras to print available camera indices.
@@ -16,6 +16,7 @@ import os
 import pathlib
 import sys
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from typing import Set
 
@@ -25,6 +26,7 @@ CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 import cv2
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from vision.detector import PersonDetector
 from vision.face import FaceDetector
@@ -40,6 +42,7 @@ from intelligence.scoring_engine import compute as compute_scores
 from intelligence.guidance_engine import GuidanceEngine
 from intelligence.auto_capture import AutoCapture
 from intelligence.pose_engine import analyze as analyze_pose
+from intelligence.claude_analyzer import analyze_capture
 
 
 def crop_9_16(frame):
@@ -55,13 +58,15 @@ def crop_9_16(frame):
     return frame
 
 # ── Config ────────────────────────────────────────────────────────────────
-CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
+CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 1))
 TARGET_FPS = 4
 WS_PORT = 8765
 INFERENCE_W, INFERENCE_H = 288, 512  # 9:16 — preserves portrait body proportions
 
 # ── State ─────────────────────────────────────────────────────────────────
 clients: Set[WebSocket] = set()
+_available_cameras: list[dict] = []
+_pending_camera: int | None = None
 
 
 async def broadcast(data: dict) -> None:
@@ -77,8 +82,39 @@ async def broadcast(data: dict) -> None:
     clients.difference_update(dead)
 
 
+async def broadcast_binary(data: bytes) -> None:
+    if not clients:
+        return
+    dead: Set[WebSocket] = set()
+    for ws in clients.copy():
+        try:
+            await ws.send_bytes(data)
+        except Exception:
+            dead.add(ws)
+    clients.difference_update(dead)
+
+
+async def _run_claude_analysis(jpeg_bytes: bytes, model_data: dict) -> None:
+    analysis = await analyze_capture(jpeg_bytes, model_data)
+    if analysis:
+        print(f"[claude] {analysis.get('headline', '')}")
+        await broadcast({"type": "claude_analysis", "analysis": analysis})
+
+
+def _scan_cameras(max_index: int = 6) -> list[dict]:
+    result = []
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
+        if cap.isOpened():
+            result.append({"index": i})
+            cap.release()
+    return result
+
+
 # ── Vision loop ───────────────────────────────────────────────────────────
-async def vision_loop(camera_index: int) -> None:
+async def vision_loop(start_index: int) -> None:
+    global _pending_camera
+
     print("[vision] Initialising detectors…")
     person_det        = PersonDetector()
     face_det          = FaceDetector()
@@ -89,42 +125,67 @@ async def vision_loop(camera_index: int) -> None:
     guidance_engine   = GuidanceEngine(stability_frames=4)
     auto_capture      = AutoCapture(score_threshold=95, stable_frames=4)
 
-    cap = cv2.VideoCapture(camera_index)
+    camera_index = start_index
+    cap = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         print(f"[vision] ✗ Cannot open camera {camera_index}.")
-        print("         Try: CAMERA_INDEX=1 python main.py")
-        print("         Or:  python main.py --list-cameras")
         return
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1080)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1920)
-    print(f"[vision] ✓ Camera {camera_index} opened. Running at {TARGET_FPS} FPS.")
+    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"[vision] ✓ Camera {camera_index} opened at {actual_w}×{actual_h}. Running at {TARGET_FPS} FPS.")
 
     frame_count = 0
     interval = 1.0 / TARGET_FPS
+    claude_in_flight = [False]   # mutable so nested async can clear the flag
+    claude_last_time = [0.0]
+    face_history: deque = deque(maxlen=8)  # last 8 face center positions
 
     while True:
         t0 = time.monotonic()
+
+        # Camera switch requested by frontend
+        if _pending_camera is not None and _pending_camera != camera_index:
+            new_index = _pending_camera
+            _pending_camera = None
+            cap.release()
+            cap = cv2.VideoCapture(new_index, cv2.CAP_AVFOUNDATION)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 720)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1280)
+            if cap.isOpened():
+                camera_index = new_index
+                print(f"[vision] Switched to camera {new_index}")
+            else:
+                print(f"[vision] ✗ Failed to open camera {new_index}, staying on {camera_index}")
+                cap = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
         ret, frame = await asyncio.to_thread(cap.read)
         if not ret:
             await asyncio.sleep(0.1)
             continue
 
-        small = cv2.resize(crop_9_16(frame), (INFERENCE_W, INFERENCE_H))
+        portrait_frame = crop_9_16(frame)
+
+        # Stream display frame to frontend (binary JPEG)
+        if clients:
+            display = cv2.resize(portrait_frame, (360, 640))
+            _, jpeg_buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            await broadcast_binary(jpeg_buf.tobytes())
+
+        small = cv2.resize(portrait_frame, (INFERENCE_W, INFERENCE_H))
 
         try:
             subjects, horizon = await asyncio.gather(
                 asyncio.to_thread(person_det.detect, small),
                 asyncio.to_thread(horizon_det.detect, small),
             )
-            faces             = await asyncio.to_thread(face_det.detect, small)
+            faces   = await asyncio.to_thread(face_det.detect, small)
             lighting = await asyncio.to_thread(lighting_analyzer.analyze, small, faces)
 
-            # Face is the trusted "person present" gate (BlazeFace at 0.7 is reliable).
-            # When face is missing, suppress everything person-related — including any
-            # YOLO subject false positives. When face is present, pose runs even if
-            # the body is partly out of frame, so pose_engine can flag out_of_frame.
             if not faces:
                 subjects    = []
                 pose_lm     = []
@@ -136,6 +197,13 @@ async def vision_loop(camera_index: int) -> None:
             print(f"[vision] detection error: {exc}")
             await asyncio.sleep(interval)
             continue
+
+        # Track subject stability via YOLOv8 (more reliable than Haar cascade)
+        if subjects:
+            sub = subjects[0]
+            face_history.append((sub['x'] + sub['w'] / 2, sub['y'] + sub['h'] / 2))
+        else:
+            face_history.clear()
 
         # ── Intelligence layer ────────────────────────────────────────────
         scene_type   = classify(subjects, faces)
@@ -160,7 +228,7 @@ async def vision_loop(camera_index: int) -> None:
 
         if capture["should_capture"]:
             filename = CAPTURE_DIR / f"capture_{int(time.time()*1000)}.jpg"
-            await asyncio.to_thread(cv2.imwrite, str(filename), crop_9_16(frame))
+            await asyncio.to_thread(cv2.imwrite, str(filename), portrait_frame)
             print(f"[capture] saved {filename}")
 
         await broadcast({
@@ -182,6 +250,32 @@ async def vision_loop(camera_index: int) -> None:
             "pose_type":         pose["pose_type"],
         })
 
+        # ── Claude live analysis — fires when subject is stable, not in-flight ─
+        _hist = face_history
+        scene_stable = (
+            len(_hist) >= 5
+            and max(p[0] for p in _hist) - min(p[0] for p in _hist) < 0.06
+            and max(p[1] for p in _hist) - min(p[1] for p in _hist) < 0.06
+        )
+        if clients and faces and not claude_in_flight[0] and scene_stable and t0 - claude_last_time[0] >= 1.0:
+            claude_last_time[0] = t0
+            claude_in_flight[0] = True
+            _, cjpeg = cv2.imencode(
+                '.jpg', cv2.resize(portrait_frame, (540, 960)),
+                [cv2.IMWRITE_JPEG_QUALITY, 85],
+            )
+            model_snapshot = {
+                "subjects": subjects, "faces": faces, "horizon": horizon,
+                "scene_type": scene_type, "scores": scores,
+                "issues": all_issues, "strengths": all_strengths,
+            }
+            async def _claude_task(jb=cjpeg.tobytes(), md=model_snapshot):
+                try:
+                    await _run_claude_analysis(jb, md)
+                finally:
+                    claude_in_flight[0] = False
+            asyncio.create_task(_claude_task())
+
         frame_count += 1
         elapsed = time.monotonic() - t0
         await asyncio.sleep(max(0.0, interval - elapsed))
@@ -192,6 +286,9 @@ async def vision_loop(camera_index: int) -> None:
 # ── FastAPI app ───────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _available_cameras
+    _available_cameras = await asyncio.to_thread(_scan_cameras)
+    print(f"[cameras] found: {[c['index'] for c in _available_cameras]}")
     task = asyncio.create_task(vision_loop(CAMERA_INDEX))
     yield
     task.cancel()
@@ -202,6 +299,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/cameras")
+async def cameras_endpoint():
+    return _available_cameras
+
+
+@app.post("/switch/{index}")
+async def switch_endpoint(index: int):
+    global _pending_camera
+    _pending_camera = index
+    return {"ok": True}
 
 
 @app.websocket("/ws")
@@ -210,7 +325,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     clients.add(websocket)
     print(f"[ws] client connected  (total: {len(clients)})")
     try:
-        async for _ in websocket.iter_text():
+        async for _ in websocket.iter_bytes():
             pass
     except WebSocketDisconnect:
         pass
