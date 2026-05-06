@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain } = require('electron')
+const { app, BrowserWindow, session, ipcMain, systemPreferences } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -36,7 +36,12 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(async () => {
+  if (process.platform === 'darwin') {
+    await systemPreferences.askForMediaAccess('camera')
+  }
+  createWindow()
+})
 
 const captureDir = path.join(os.homedir(), 'Downloads', 'capture')
 fs.mkdirSync(captureDir, { recursive: true })

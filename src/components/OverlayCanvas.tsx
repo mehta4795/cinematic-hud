@@ -13,6 +13,7 @@ import { drawCaptureFlash } from '../overlays/CaptureFlash'
 import { drawVignette } from '../overlays/Vignette'
 import { drawCinematicBars } from '../overlays/CinematicBars'
 import { drawCaptureSuccess } from '../overlays/CaptureSuccess'
+import { drawLightingIndicator } from '../overlays/LightingIndicator'
 import { useVisionSocket } from '../websocket/useVisionSocket'
 import {
   playSubjectLock,
@@ -72,13 +73,29 @@ const INITIAL_STATE: OverlayState = {
   zoomTarget: ZOOM_BASE,
   captureSuccessOpacity: 0,
   captureCount: 0,
+  lighting: {
+    exposure: 'good' as const,
+    faceBrightness: 0.5,
+    dynamicRange: 'normal' as const,
+    backlit: false,
+    harshShadow: false,
+  },
 }
 
-export function OverlayCanvas() {
+interface Props {
+  onCapture: (dataUrl: string) => void
+  isReviewing: boolean
+}
+
+export function OverlayCanvas({ onCapture, isReviewing }: Props) {
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const stateRef   = useRef<OverlayState>(structuredClone(INITIAL_STATE))
   const heroRef    = useRef(false)
   const prevRef    = useRef({ focusActive: false, captureReady: false })
+  const onCaptureRef = useRef(onCapture)
+  onCaptureRef.current = onCapture
+  const isReviewingRef = useRef(isReviewing)
+  isReviewingRef.current = isReviewing
 
   useVisionSocket(stateRef)
 
@@ -167,6 +184,19 @@ export function OverlayCanvas() {
     if (s.shouldCapture) {
       s.captureSuccessOpacity = 1.0
       s.captureCount += 1
+
+      if (!isReviewingRef.current) {
+        const video = canvas.parentElement?.querySelector('video') as HTMLVideoElement | null
+        if (video && video.videoWidth > 0) {
+          const snap = document.createElement('canvas')
+          snap.width = video.videoWidth
+          snap.height = video.videoHeight
+          snap.getContext('2d')!.drawImage(video, 0, 0)
+          const dataUrl = snap.toDataURL('image/jpeg', 0.95)
+          window.api.saveCapture(dataUrl)
+          onCaptureRef.current(dataUrl)
+        }
+      }
     }
     s.shouldCapture = false
     if (s.captureSuccessOpacity > 0) {
@@ -246,6 +276,7 @@ export function OverlayCanvas() {
     drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
     drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
+    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, h)
     drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
 
     // Hero Mode badge

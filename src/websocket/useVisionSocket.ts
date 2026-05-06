@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
-import type { OverlayState, ScoreBreakdown } from '../types/overlay'
+import type { OverlayState, ScoreBreakdown, LightingState } from '../types/overlay'
 
 interface SubjectMsg {
   id: number; label: string
@@ -10,6 +10,14 @@ interface SubjectMsg {
 
 interface FaceMsg {
   x: number; y: number; w: number; h: number
+}
+
+interface LightingMsg {
+  exposure: LightingState['exposure']
+  face_brightness: number
+  dynamic_range: LightingState['dynamicRange']
+  backlit: boolean
+  harsh_shadow: boolean
 }
 
 interface VisionFrame {
@@ -26,6 +34,7 @@ interface VisionFrame {
   should_capture: boolean
   capture_countdown: number
   best_score: number
+  lighting?: LightingMsg
 }
 
 const WS_URL = 'ws://localhost:8765/ws'
@@ -86,6 +95,16 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
 
         if (msg.should_capture) {
           s.captureFlash = 1.0
+        }
+
+        if (msg.lighting) {
+          s.lighting = {
+            exposure:       msg.lighting.exposure       ?? 'good',
+            faceBrightness: msg.lighting.face_brightness ?? 0.5,
+            dynamicRange:   msg.lighting.dynamic_range   ?? 'normal',
+            backlit:        msg.lighting.backlit         ?? false,
+            harshShadow:    msg.lighting.harsh_shadow    ?? false,
+          }
         }
       }
 

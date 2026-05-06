@@ -14,6 +14,10 @@ _ISSUE_COACHING: dict[str, str] = {
     "face_too_high":      "Tilt camera up",
     "no_face_detected":   "Center subject in frame",
     "no_subject":         "Point camera at subject",
+    "backlit":            "Move away from background light",
+    "harsh_shadow":       "Find softer lighting",
+    "underexposed":       "Find better lighting",
+    "overexposed":        "Reduce light or move to shade",
 }
 
 # ── High-score cinematic affirmations (by scene type) ─────────────────────
