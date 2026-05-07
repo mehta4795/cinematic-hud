@@ -73,13 +73,7 @@ export interface OverlayState {
   captureFlash: number
   bestScore: number
 
-  // Phase 4
-  reframeX: number
-  reframeY: number
-  reframeTargetX: number
-  reframeTargetY: number
-  zoomLevel: number
-  zoomTarget: number
+  // Capture success
   captureSuccessOpacity: number
   captureCount: number
 

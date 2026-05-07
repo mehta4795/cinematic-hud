@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef } from 'react'
 import { useAnimationFrame } from '../hooks/useAnimationFrame'
 import type { OverlayState } from '../types/overlay'
 import { lerpVec2, lerp } from '../types/overlay'
@@ -24,21 +24,6 @@ import {
   playCapturePulse,
   playShutter,
 } from '../audio/sounds'
-
-// Base constants — Hero Mode overrides these
-const ZOOM_BASE   = 1.0
-const ZOOM_ACTIVE = 1.15
-const ZOOM_HIGH   = 1.22
-const MAX_SHIFT_X = 32
-const MAX_SHIFT_Y = 70
-
-// Hero Mode overrides
-const HERO_ZOOM_ACTIVE = 1.22
-const HERO_ZOOM_HIGH   = 1.35
-const HERO_MAX_SHIFT_X = 48
-const HERO_MAX_SHIFT_Y = 100
-const HERO_REFRAME_T   = 0.025
-const HERO_SCORE_GATE  = 80
 
 const INITIAL_STATE: OverlayState = {
   focusBox: {
@@ -67,12 +52,6 @@ const INITIAL_STATE: OverlayState = {
   shouldCapture: false,
   captureFlash: 0,
   bestScore: 0,
-  reframeX: 0,
-  reframeY: 0,
-  reframeTargetX: 0,
-  reframeTargetY: 0,
-  zoomLevel: 1.0,
-  zoomTarget: 1.0,
   captureSuccessOpacity: 0,
   captureCount: 0,
   lighting: {
@@ -106,16 +85,6 @@ export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, strea
   const isReviewingRef = useRef(isReviewing)
   isReviewingRef.current = isReviewing
   const frameRef   = useRef<ImageBitmap | null>(null)
-  const [hero, setHero] = useState(false)
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'h') return
-      setHero(h => !h)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   useVisionSocket(stateRef, phoneMode ? undefined : (bmp) => {
     frameRef.current?.close()
@@ -256,43 +225,10 @@ export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, strea
     prevRef.current.focusActive  = s.focusBox.active
     prevRef.current.captureReady = s.captureReady
 
-    // ── Smart Reframing ───────────────────────────────────────────────────
-    const maxX = hero ? HERO_MAX_SHIFT_X : MAX_SHIFT_X
-    const maxY = hero ? HERO_MAX_SHIFT_Y : MAX_SHIFT_Y
-    const reframeT = hero ? HERO_REFRAME_T : 0.012
-
-    if (s.focusBox.active) {
-      const idealX = w * (s.sceneType === 'landscape' ? 0.5 : 0.36)
-      const idealY = h * 0.38
-      const subjectX = s.focusBox.current.x * w
-      const subjectY = s.focusBox.current.y * h
-      s.reframeTargetX = Math.max(-maxX, Math.min(maxX, idealX - subjectX))
-      s.reframeTargetY = Math.max(-maxY, Math.min(maxY, idealY - subjectY))
-    } else {
-      s.reframeTargetX = 0
-      s.reframeTargetY = 0
-    }
-    s.reframeX = lerp(s.reframeX, s.reframeTargetX, reframeT)
-    s.reframeY = lerp(s.reframeY, s.reframeTargetY, reframeT)
-
-    // ── Cinematic zoom ────────────────────────────────────────────────────
-    const zoomActive = hero ? HERO_ZOOM_ACTIVE : ZOOM_ACTIVE
-    const zoomHigh   = hero ? HERO_ZOOM_HIGH   : ZOOM_HIGH
-    const scoreGate  = hero ? HERO_SCORE_GATE  : 80
-
-    s.zoomTarget = s.focusBox.active
-      ? (s.scoreCurrent >= scoreGate ? zoomHigh : zoomActive)
-      : ZOOM_BASE
-    s.zoomLevel = lerp(s.zoomLevel, s.zoomTarget, 0.0008)
-
     // ── Draw ──────────────────────────────────────────────────────────────
     ctx.clearRect(0, 0, w, h)
 
-    // Video frame + tracking overlays share the zoom/reframe transform
-    ctx.save()
-    ctx.translate(w / 2 + s.reframeX, h / 2 + s.reframeY)
-    ctx.scale(s.zoomLevel, s.zoomLevel)
-    ctx.translate(-w / 2, -h / 2)
+    // Video frame + tracking overlays — drawn at native canvas coords
     if (!phoneMode && frameRef.current) ctx.drawImage(frameRef.current, 0, 0, w, h)
     drawFocusBox(
       ctx,
@@ -304,7 +240,6 @@ export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, strea
     )
     drawFaceGuides(ctx, s.faces, w, h)
     if (s.faces.length > 0) drawPoseGuide(ctx, s.poseLandmarks, s.poseType, s.poseIssues, w, h)
-    ctx.restore()
 
     // Fixed HUD overlays (no transform)
     // Offset bottom-anchored drawers above Safari browser toolbar (~83px)
@@ -312,7 +247,7 @@ export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, strea
     const safeH = h - (isStandalone ? 20 : 90)
 
     if (s.showGrid) drawGrid(ctx, w, h)
-    drawVignette(ctx, w, h, s.focusBox.active ? (hero ? 0.9 : 0.7) : 0.2)
+    drawVignette(ctx, w, h, s.focusBox.active ? 0.7 : 0.2)
     drawHorizonGuide(ctx, s.horizonCurrent, w, h)
     drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
     drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
@@ -320,18 +255,6 @@ export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, strea
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
     if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, safeH)
     drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
-
-    if (hero) {
-      ctx.save()
-      ctx.textBaseline = 'top'
-      ctx.textAlign = 'left'
-      ctx.fillStyle = 'rgba(0, 255, 120, 0.9)'
-      ctx.shadowColor = 'rgba(0, 255, 120, 0.5)'
-      ctx.shadowBlur = 8
-      ctx.font = '700 8px "SF Mono", "Courier New", monospace'
-      ctx.fillText('◈ HERO MODE', 14, 14)
-      ctx.restore()
-    }
 
     if (s.claudeAnalysis && s.claudeAnalysisOpacity > 0) {
       drawClaudeAnalysis(ctx, s.claudeAnalysis, s.claudeAnalysisOpacity, w, h)
