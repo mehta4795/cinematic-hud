@@ -22,7 +22,7 @@ class PersonDetector:
         Coordinates: x,y = top-left corner, w,h = size, all in 0-1 range.
         """
         h, w = frame.shape[:2]
-        results = self.model.predict(frame, verbose=False, classes=[0], conf=0.4)
+        results = self.model.predict(frame, verbose=False, classes=[0], conf=0.6)
 
         detections: list[dict] = []
         for result in results:

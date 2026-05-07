@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
-import type { OverlayState, ScoreBreakdown, LightingState } from '../types/overlay'
+import type { OverlayState, ScoreBreakdown, LightingState, PoseLandmark } from '../types/overlay'
 
 interface SubjectMsg {
   id: number; label: string
@@ -35,6 +35,8 @@ interface VisionFrame {
   capture_countdown: number
   best_score: number
   lighting?: LightingMsg
+  pose_landmarks?: PoseLandmark[]
+  pose_type?: string
 }
 
 const WS_URL = 'ws://localhost:8765/ws'
@@ -90,7 +92,7 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
 
         // Phase 3 fields
         s.sceneType        = msg.scene_type ?? 'general'
-        s.scoreBreakdown   = msg.scores ?? s.scoreBreakdown
+        s.scoreBreakdown   = msg.scores ? { ...s.scoreBreakdown, ...msg.scores } : s.scoreBreakdown
         s.captureReady     = msg.capture_ready ?? false
         s.captureCountdown = msg.capture_countdown ?? 0
         s.shouldCapture    = msg.should_capture ?? false
@@ -109,6 +111,14 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
             harshShadow:    msg.lighting.harsh_shadow    ?? false,
           }
         }
+
+        s.poseLandmarks = msg.pose_landmarks ?? []
+        s.poseType      = msg.pose_type      ?? 'general'
+
+        const POSE_ISSUE_KEYS = new Set([
+          'uneven_shoulders', 'leaning', 'out_of_frame', 'head_tilted', 'not_facing_camera',
+        ])
+        s.poseIssues = (msg.issues ?? []).filter((k: string) => POSE_ISSUE_KEYS.has(k))
       }
 
       ws.onclose = () => {

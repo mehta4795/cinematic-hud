@@ -14,6 +14,7 @@ import { drawVignette } from '../overlays/Vignette'
 import { drawCinematicBars } from '../overlays/CinematicBars'
 import { drawCaptureSuccess } from '../overlays/CaptureSuccess'
 import { drawLightingIndicator } from '../overlays/LightingIndicator'
+import { drawPoseGuide } from '../overlays/PoseGuide'
 import { captureFrame } from '../utils/captureFrame'
 import { useVisionSocket } from '../websocket/useVisionSocket'
 import {
@@ -43,7 +44,7 @@ const INITIAL_STATE: OverlayState = {
   guidanceOpacity: 0,
   aiConnected: false,
   sceneType: 'general',
-  scoreBreakdown: { overall: 50, composition: 50, framing: 50, portrait: 50, horizon: 50 },
+  scoreBreakdown: { overall: 50, composition: 50, framing: 50, portrait: 50, horizon: 50, lighting: 100, pose: 100 },
   captureReady: false,
   captureCountdown: 0,
   shouldCapture: false,
@@ -64,6 +65,9 @@ const INITIAL_STATE: OverlayState = {
     backlit: false,
     harshShadow: false,
   },
+  poseLandmarks: [],
+  poseType: 'general',
+  poseIssues: [],
 }
 
 interface Props {
@@ -129,6 +133,13 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
     for (const face of s.faces) {
       face.smoothCx = lerp(face.smoothCx, face.cx, 0.08)
       face.smoothCy = lerp(face.smoothCy, face.cy, 0.08)
+    }
+
+    // ── Pose landmark smoothing ───────────────────────────────────────────
+    for (const lm of s.poseLandmarks) {
+      if (!(lm as any)._sx) { (lm as any)._sx = lm.x; (lm as any)._sy = lm.y }
+      ;(lm as any)._sx = lerp((lm as any)._sx, lm.x, 0.15)
+      ;(lm as any)._sy = lerp((lm as any)._sy, lm.y, 0.15)
     }
 
     // ── Guidance cross-fade ───────────────────────────────────────────────
@@ -218,6 +229,7 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
       s.focusBox.active,
     )
     drawFaceGuides(ctx, s.faces, vidW, vidH)
+    if (s.faces.length > 0) drawPoseGuide(ctx, s.poseLandmarks, s.poseType, s.poseIssues, vidW, vidH)
     drawHudText(ctx, s.hudText.text, s.hudText.opacity, vidW, vidH)
     drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, vidW, vidH)
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, vidW, vidH)

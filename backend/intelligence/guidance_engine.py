@@ -14,10 +14,15 @@ _ISSUE_COACHING: dict[str, str] = {
     "face_too_high":      "Tilt camera up",
     "no_face_detected":   "Center subject in frame",
     "no_subject":         "Point camera at subject",
-    "backlit":            "Move away from background light",
-    "harsh_shadow":       "Find softer lighting",
-    "underexposed":       "Find better lighting",
-    "overexposed":        "Reduce light or move to shade",
+    "backlit":             "Move away from background light",
+    "harsh_shadow":        "Find softer lighting",
+    "underexposed":        "Find better lighting",
+    "overexposed":         "Reduce light or move to shade",
+    "uneven_shoulders":    "Level your shoulders",
+    "leaning":             "Stand straight",
+    "out_of_frame":        "Step back to fit in frame",
+    "head_tilted":         "Level your head",
+    "not_facing_camera":   "Face the camera",
 }
 
 # ── High-score cinematic affirmations (by scene type) ─────────────────────
@@ -30,11 +35,12 @@ _CINEMATIC: dict[str, dict[str, str]] = {
 }
 
 _STRENGTH_PRAISE: dict[str, str] = {
-    "rule_of_thirds":  "Rule of thirds — beautiful",
+    "rule_of_thirds":   "Rule of thirds — beautiful",
     "balanced_framing": "Balanced composition",
-    "good_headroom":   "Good headroom",
-    "ideal_face_size": "Perfect subject scale",
-    "good_eye_line":   "Strong eye-line placement",
+    "good_headroom":    "Good headroom",
+    "ideal_face_size":  "Perfect subject scale",
+    "good_eye_line":    "Strong eye-line placement",
+    "good_posture":     "Strong confident pose",
 }
 
 

@@ -12,6 +12,13 @@ export interface FaceData {
   smoothCy: number
 }
 
+export interface PoseLandmark {
+  idx: number
+  x: number
+  y: number
+  vis: number
+}
+
 export interface ScoreBreakdown {
   overall: number
   composition: number
@@ -19,6 +26,7 @@ export interface ScoreBreakdown {
   portrait: number
   horizon: number
   lighting: number
+  pose: number
 }
 
 export interface LightingState {
@@ -77,6 +85,11 @@ export interface OverlayState {
 
   // Phase 5
   lighting: LightingState
+
+  // Phase 6 — Pose
+  poseLandmarks: PoseLandmark[]
+  poseType: string
+  poseIssues: string[]
 }
 
 export function lerp(a: number, b: number, t: number): number {

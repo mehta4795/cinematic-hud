@@ -30,6 +30,8 @@ from vision.detector import PersonDetector
 from vision.face import FaceDetector
 from vision.horizon import HorizonDetector
 from vision.lighting import LightingAnalyzer
+from vision.pose import PoseDetector
+from vision.facemesh import FaceMeshDetector
 
 from intelligence.scene_classifier import classify
 from intelligence.composition_engine import analyze as analyze_composition
@@ -37,6 +39,7 @@ from intelligence.portrait_rules import analyze as analyze_portrait
 from intelligence.scoring_engine import compute as compute_scores
 from intelligence.guidance_engine import GuidanceEngine
 from intelligence.auto_capture import AutoCapture
+from intelligence.pose_engine import analyze as analyze_pose
 
 
 def crop_9_16(frame):
@@ -55,7 +58,7 @@ def crop_9_16(frame):
 CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
 TARGET_FPS = 4
 WS_PORT = 8765
-INFERENCE_SIZE = 512
+INFERENCE_W, INFERENCE_H = 288, 512  # 9:16 — preserves portrait body proportions
 
 # ── State ─────────────────────────────────────────────────────────────────
 clients: Set[WebSocket] = set()
@@ -77,12 +80,14 @@ async def broadcast(data: dict) -> None:
 # ── Vision loop ───────────────────────────────────────────────────────────
 async def vision_loop(camera_index: int) -> None:
     print("[vision] Initialising detectors…")
-    person_det      = PersonDetector()
-    face_det        = FaceDetector()
-    horizon_det     = HorizonDetector()
+    person_det        = PersonDetector()
+    face_det          = FaceDetector()
+    horizon_det       = HorizonDetector()
     lighting_analyzer = LightingAnalyzer()
-    guidance_engine = GuidanceEngine(stability_frames=4)
-    auto_capture    = AutoCapture(score_threshold=90, stable_frames=4)
+    pose_det          = PoseDetector()
+    facemesh_det      = FaceMeshDetector()
+    guidance_engine   = GuidanceEngine(stability_frames=4)
+    auto_capture      = AutoCapture(score_threshold=95, stable_frames=4)
 
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
@@ -106,15 +111,27 @@ async def vision_loop(camera_index: int) -> None:
             await asyncio.sleep(0.1)
             continue
 
-        small = cv2.resize(crop_9_16(frame), (INFERENCE_SIZE, INFERENCE_SIZE))
+        small = cv2.resize(crop_9_16(frame), (INFERENCE_W, INFERENCE_H))
 
         try:
             subjects, horizon = await asyncio.gather(
                 asyncio.to_thread(person_det.detect, small),
                 asyncio.to_thread(horizon_det.detect, small),
             )
-            faces   = await asyncio.to_thread(face_det.detect, small)
+            faces             = await asyncio.to_thread(face_det.detect, small)
             lighting = await asyncio.to_thread(lighting_analyzer.analyze, small, faces)
+
+            # Face is the trusted "person present" gate (BlazeFace at 0.7 is reliable).
+            # When face is missing, suppress everything person-related — including any
+            # YOLO subject false positives. When face is present, pose runs even if
+            # the body is partly out of frame, so pose_engine can flag out_of_frame.
+            if not faces:
+                subjects    = []
+                pose_lm     = []
+                head_orient = {"roll": 0.0, "yaw": 0.0}
+            else:
+                pose_lm     = await asyncio.to_thread(pose_det.detect, small)
+                head_orient = await asyncio.to_thread(facemesh_det.detect, small, True)
         except Exception as exc:
             print(f"[vision] detection error: {exc}")
             await asyncio.sleep(interval)
@@ -124,9 +141,10 @@ async def vision_loop(camera_index: int) -> None:
         scene_type   = classify(subjects, faces)
         composition  = analyze_composition(subjects, faces)
         portrait     = analyze_portrait(faces, scene_type)
+        pose         = analyze_pose(pose_lm, head_orient)
 
         confidence   = subjects[0]["confidence"] if subjects else 0.0
-        scores       = compute_scores(composition, portrait, horizon, confidence, lighting)
+        scores       = compute_scores(composition, portrait, horizon, confidence, lighting, pose)
 
         lighting_issues = []
         if lighting["backlit"]:                          lighting_issues.append("backlit")
@@ -134,8 +152,8 @@ async def vision_loop(camera_index: int) -> None:
         if lighting["exposure"] == "underexposed":       lighting_issues.append("underexposed")
         elif lighting["exposure"] == "overexposed":      lighting_issues.append("overexposed")
 
-        all_issues    = composition["issues"] + portrait["issues"] + lighting_issues
-        all_strengths = composition["strengths"] + portrait["strengths"]
+        all_issues    = composition["issues"] + portrait["issues"] + lighting_issues + pose["issues"]
+        all_strengths = composition["strengths"] + portrait["strengths"] + pose["strengths"]
 
         guidance = guidance_engine.generate(all_issues, all_strengths, scores, scene_type)
         capture  = auto_capture.update(scores, subjects, horizon)
@@ -160,6 +178,8 @@ async def vision_loop(camera_index: int) -> None:
             "capture_countdown": capture["capture_countdown"],
             "best_score":        capture["best_score"],
             "lighting":          lighting,
+            "pose_landmarks":    pose_lm,
+            "pose_type":         pose["pose_type"],
         })
 
         frame_count += 1
