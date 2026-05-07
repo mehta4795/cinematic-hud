@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { getFrame } from '../websocket/frameStore'
+import { BACKEND_HTTP } from '../config/backend'
 
 interface Props {
   onCapture: (dataUrl: string) => void
@@ -24,7 +25,15 @@ export function CaptureButton({ onCapture }: Props) {
     setTimeout(() => setFlash(false), 150)
 
     onCapture(dataUrl)
-    window.api?.saveCapture(dataUrl)
+    if (window.api) {
+      await window.api.saveCapture(dataUrl)
+    } else {
+      await fetch(`${BACKEND_HTTP()}/save-capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl }),
+      }).catch(() => {})
+    }
   }, [onCapture])
 
   return (

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import type { OverlayState, ScoreBreakdown, LightingState, PoseLandmark } from '../types/overlay'
 import { setFrame } from './frameStore'
+import { BACKEND_WS } from '../config/backend'
 
 interface SubjectMsg {
   id: number; label: string
@@ -40,12 +41,12 @@ interface VisionFrame {
   pose_type?: string
 }
 
-const WS_URL = 'ws://localhost:8765/ws'
 const RECONNECT_DELAY_MS = 2000
 
 export function useVisionSocket(
   stateRef: MutableRefObject<OverlayState>,
   onFrame?: (bmp: ImageBitmap) => void,
+  active = true,
 ) {
   const wsRef = useRef<WebSocket | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
@@ -53,8 +54,9 @@ export function useVisionSocket(
   onFrameRef.current = onFrame
 
   useEffect(() => {
+    if (!active) return
     function connect() {
-      const ws = new WebSocket(WS_URL)
+      const ws = new WebSocket(`${BACKEND_WS()}/ws`)
       ws.binaryType = 'blob'
       wsRef.current = ws
 
@@ -155,5 +157,5 @@ export function useVisionSocket(
       clearTimeout(timerRef.current)
       wsRef.current?.close()
     }
-  }, [])
+  }, [active])
 }

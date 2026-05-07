@@ -24,6 +24,7 @@ CAPTURE_DIR = pathlib.Path.home() / "Downloads" / "capture"
 CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 
 import cv2
+import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,11 +95,67 @@ async def broadcast_binary(data: bytes) -> None:
     clients.difference_update(dead)
 
 
+def _annotate_image(jpeg_bytes: bytes, analysis: dict) -> bytes:
+    img = cv2.imdecode(
+        np.frombuffer(jpeg_bytes, dtype=np.uint8),
+        cv2.IMREAD_COLOR,
+    )
+    h, w = img.shape[:2]
+    pad = 14
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    lines: list[tuple[str, float, tuple]] = []
+    score = analysis.get("overall_score", "?")
+    headline = analysis.get("headline", "")
+    lines.append((f"Score: {score}  |  {headline}", 0.52, (255, 220, 60)))
+
+    for tip in (analysis.get("top_tips") or []):
+        # wrap long tips at ~55 chars
+        words, cur = tip.split(), ""
+        for w_ in words:
+            if len(cur) + len(w_) + 1 > 55:
+                lines.append((f"  > {cur.strip()}", 0.42, (120, 255, 140)))
+                cur = w_ + " "
+            else:
+                cur += w_ + " "
+        if cur.strip():
+            lines.append((f"  > {cur.strip()}", 0.42, (120, 255, 140)))
+
+    cats = analysis.get("categories", {})
+    for name, data in cats.items():
+        issue = data.get("issue") if isinstance(data, dict) else None
+        if issue:
+            sc = data.get("score", "?")
+            lines.append((f"  [{name} {sc}] {issue}", 0.38, (100, 180, 255)))
+
+    line_h = 22
+    box_h = pad * 2 + line_h * len(lines)
+    overlay = img.copy()
+    cv2.rectangle(overlay, (0, h - box_h), (img.shape[1], h), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.65, img, 0.35, 0, img)
+
+    y = h - box_h + pad + 14
+    for text, scale, color in lines:
+        cv2.putText(img, text, (pad, y), font, scale, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, text, (pad, y), font, scale, color,   1, cv2.LINE_AA)
+        y += line_h
+
+    _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    return buf.tobytes()
+
+
 async def _run_claude_analysis(jpeg_bytes: bytes, model_data: dict) -> None:
     analysis = await analyze_capture(jpeg_bytes, model_data)
     if analysis:
         print(f"[claude] {analysis.get('headline', '')}")
         await broadcast({"type": "claude_analysis", "analysis": analysis})
+        ts = int(time.time() * 1000)
+        img_path  = CAPTURE_DIR / f"claude_{ts}.jpg"
+        json_path = CAPTURE_DIR / f"claude_{ts}.json"
+        annotated = await asyncio.to_thread(_annotate_image, jpeg_bytes, analysis)
+        await asyncio.to_thread(img_path.write_bytes, annotated)
+        json_path.write_text(json.dumps({"analysis": analysis, "model_data": model_data}, indent=2))
+        print(f"[claude] saved {img_path.name}")
 
 
 def _scan_cameras(max_index: int = 6) -> list[dict]:
@@ -250,14 +307,8 @@ async def vision_loop(start_index: int) -> None:
             "pose_type":         pose["pose_type"],
         })
 
-        # ── Claude live analysis — fires when subject is stable, not in-flight ─
-        _hist = face_history
-        scene_stable = (
-            len(_hist) >= 5
-            and max(p[0] for p in _hist) - min(p[0] for p in _hist) < 0.06
-            and max(p[1] for p in _hist) - min(p[1] for p in _hist) < 0.06
-        )
-        if clients and faces and not claude_in_flight[0] and scene_stable and t0 - claude_last_time[0] >= 1.0:
+        # ── Claude live analysis — relaxed for testing: fires on any frame, 1s cooldown ─
+        if clients and not claude_in_flight[0] and t0 - claude_last_time[0] >= 1.0:
             claude_last_time[0] = t0
             claude_in_flight[0] = True
             _, cjpeg = cv2.imencode(
@@ -312,6 +363,20 @@ async def cameras_endpoint():
     return _available_cameras
 
 
+@app.post("/save-capture")
+async def save_capture_endpoint(payload: dict):
+    import base64
+    data_url: str = payload.get("dataUrl", "")
+    if not data_url:
+        return {"ok": False}
+    header, _, b64 = data_url.partition(",")
+    jpeg_bytes = base64.b64decode(b64)
+    filename = CAPTURE_DIR / f"capture_{int(time.time()*1000)}.jpg"
+    await asyncio.to_thread(filename.write_bytes, jpeg_bytes)
+    print(f"[capture/phone] saved {filename.name}")
+    return {"ok": True, "file": str(filename)}
+
+
 @app.post("/switch/{index}")
 async def switch_endpoint(index: int):
     global _pending_camera
@@ -332,6 +397,117 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     finally:
         clients.discard(websocket)
         print(f"[ws] client disconnected (total: {len(clients)})")
+
+
+@app.websocket("/ws/phone")
+async def ws_phone_endpoint(websocket: WebSocket) -> None:
+    """Phone camera mode — client sends JPEG frames, backend processes and returns JSON."""
+    await websocket.accept()
+    print("[ws/phone] client connected")
+
+    person_det   = PersonDetector()
+    face_det     = FaceDetector()
+    horizon_det  = HorizonDetector()
+    guidance_engine = GuidanceEngine(stability_frames=4)
+    auto_capture    = AutoCapture(score_threshold=90, stable_frames=4)
+    claude_in_flight = [False]
+    claude_last_time = [0.0]
+    frame_count = 0
+
+    try:
+        async for data in websocket.iter_bytes():
+            t0 = time.monotonic()
+
+            frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+
+            fh, fw = frame.shape[:2]
+            if fw > fh:
+                crop_w = int(fh * 9 / 16)
+                x0 = (fw - crop_w) // 2
+                portrait_frame = frame[:, x0:x0 + crop_w]
+            else:
+                portrait_frame = frame
+
+            small      = cv2.resize(portrait_frame, (INFERENCE_SIZE, INFERENCE_SIZE))
+            face_frame = cv2.resize(portrait_frame, (INFERENCE_SIZE * 9 // 16, INFERENCE_SIZE))
+
+            subjects, faces, horizon = await asyncio.gather(
+                asyncio.to_thread(person_det.detect,  small),
+                asyncio.to_thread(face_det.detect,    face_frame),
+                asyncio.to_thread(horizon_det.detect, small),
+            )
+
+            scene_type  = classify(subjects, faces)
+            composition = analyze_composition(subjects, faces)
+            portrait    = analyze_portrait(faces, scene_type)
+            confidence  = subjects[0]["confidence"] if subjects else 0.0
+            scores      = compute_scores(composition, portrait, horizon, confidence)
+            all_issues    = composition["issues"]   + portrait["issues"]
+            all_strengths = composition["strengths"] + portrait["strengths"]
+            guidance = guidance_engine.generate(all_issues, all_strengths, scores, scene_type)
+            capture  = auto_capture.update(scores, subjects, horizon)
+
+            if capture["should_capture"]:
+                filename = CAPTURE_DIR / f"capture_{int(time.time()*1000)}.jpg"
+                await asyncio.to_thread(cv2.imwrite, str(filename), portrait_frame)
+                print(f"[capture/phone] saved {filename.name}")
+
+            await websocket.send_text(json.dumps({
+                "frame":             frame_count,
+                "subjects":          subjects,
+                "faces":             faces,
+                "horizon":           horizon,
+                "scene_type":        scene_type,
+                "scores":            scores,
+                "issues":            all_issues,
+                "strengths":         all_strengths,
+                "guidance":          [guidance] if guidance else [],
+                "capture_ready":     capture["capture_ready"],
+                "should_capture":    capture["should_capture"],
+                "capture_countdown": capture["capture_countdown"],
+                "best_score":        capture["best_score"],
+            }))
+
+            if not claude_in_flight[0] and t0 - claude_last_time[0] >= 1.0:
+                claude_last_time[0] = t0
+                claude_in_flight[0] = True
+                _, cjpeg = cv2.imencode(
+                    '.jpg', cv2.resize(portrait_frame, (540, 960)),
+                    [cv2.IMWRITE_JPEG_QUALITY, 85],
+                )
+                model_snapshot = {
+                    "subjects": subjects, "faces": faces, "horizon": horizon,
+                    "scene_type": scene_type, "scores": scores,
+                    "issues": all_issues, "strengths": all_strengths,
+                }
+                async def _claude_phone(jb=cjpeg.tobytes(), md=model_snapshot, ws=websocket):
+                    try:
+                        analysis = await analyze_capture(jb, md)
+                        if analysis:
+                            print(f"[claude/phone] {analysis.get('headline', '')}")
+                            try:
+                                await ws.send_text(json.dumps({"type": "claude_analysis", "analysis": analysis}))
+                            except Exception:
+                                pass
+                            ts = int(time.time() * 1000)
+                            img_path  = CAPTURE_DIR / f"claude_{ts}.jpg"
+                            json_path = CAPTURE_DIR / f"claude_{ts}.json"
+                            annotated = await asyncio.to_thread(_annotate_image, jb, analysis)
+                            await asyncio.to_thread(img_path.write_bytes, annotated)
+                            json_path.write_text(json.dumps({"analysis": analysis, "model_data": md}, indent=2))
+                            print(f"[claude/phone] saved {img_path.name}")
+                    finally:
+                        claude_in_flight[0] = False
+                asyncio.create_task(_claude_phone())
+
+            frame_count += 1
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        print("[ws/phone] client disconnected")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────

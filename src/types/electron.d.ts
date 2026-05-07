@@ -1,5 +1,5 @@
 interface Window {
-  api: {
+  api?: {
     saveCapture: (dataUrl: string) => Promise<string>
   }
 }

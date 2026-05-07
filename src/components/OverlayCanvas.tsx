@@ -18,6 +18,7 @@ import { drawLightingIndicator } from '../overlays/LightingIndicator'
 import { drawPoseGuide } from '../overlays/PoseGuide'
 import { getFrame } from '../websocket/frameStore'
 import { useVisionSocket } from '../websocket/useVisionSocket'
+import { usePhoneCameraSocket } from '../websocket/usePhoneCameraSocket'
 import {
   playSubjectLock,
   playCapturePulse,
@@ -93,9 +94,11 @@ const INITIAL_STATE: OverlayState = {
 interface Props {
   onCapture: (dataUrl: string) => void
   isReviewing: boolean
+  phoneMode?: boolean
+  stream?: MediaStream | null
 }
 
-export function OverlayCanvas({ onCapture, isReviewing }: Props) {
+export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, stream = null }: Props) {
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const stateRef   = useRef<OverlayState>(structuredClone(INITIAL_STATE))
   const prevRef    = useRef({ focusActive: false, captureReady: false })
@@ -115,10 +118,12 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  useVisionSocket(stateRef, (bmp) => {
+  useVisionSocket(stateRef, phoneMode ? undefined : (bmp) => {
     frameRef.current?.close()
     frameRef.current = bmp
-  })
+  }, !phoneMode)
+
+  usePhoneCameraSocket(stateRef, stream, phoneMode)
 
   useAnimationFrame(delta => {
     const canvas = canvasRef.current
@@ -289,7 +294,7 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
     ctx.translate(w / 2 + s.reframeX, h / 2 + s.reframeY)
     ctx.scale(s.zoomLevel, s.zoomLevel)
     ctx.translate(-w / 2, -h / 2)
-    if (frameRef.current) ctx.drawImage(frameRef.current, 0, 0, w, h)
+    if (!phoneMode && frameRef.current) ctx.drawImage(frameRef.current, 0, 0, w, h)
     drawFocusBox(
       ctx,
       { x: s.focusBox.current.x * w, y: s.focusBox.current.y * h },

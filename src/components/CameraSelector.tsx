@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { BACKEND_HTTP } from '../config/backend'
 
 interface Camera { index: number }
 
@@ -11,7 +12,7 @@ export function CameraSelector({ activeIndex, onSelect }: Props) {
   const [cameras, setCameras] = useState<Camera[]>([])
 
   useEffect(() => {
-    fetch('http://localhost:8765/cameras')
+    fetch(`${BACKEND_HTTP()}/cameras`)
       .then(r => r.json())
       .then(setCameras)
       .catch(() => {})
