@@ -130,7 +130,7 @@ async def vision_loop(camera_index: int) -> None:
                 pose_lm     = []
                 head_orient = {"roll": 0.0, "yaw": 0.0}
             else:
-                pose_lm     = await asyncio.to_thread(pose_det.detect, small)
+                pose_lm     = await asyncio.to_thread(pose_det.detect, small, faces[0])
                 head_orient = await asyncio.to_thread(facemesh_det.detect, small, True)
         except Exception as exc:
             print(f"[vision] detection error: {exc}")
