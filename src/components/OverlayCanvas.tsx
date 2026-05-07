@@ -75,7 +75,6 @@ const INITIAL_STATE: OverlayState = {
   zoomTarget: 1.0,
   captureSuccessOpacity: 0,
   captureCount: 0,
-<<<<<<< HEAD
   lighting: {
     exposure: 'good' as const,
     faceBrightness: 0.5,
@@ -308,14 +307,18 @@ export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, strea
     ctx.restore()
 
     // Fixed HUD overlays (no transform)
+    // Offset bottom-anchored drawers above Safari browser toolbar (~83px)
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    const safeH = h - (isStandalone ? 20 : 90)
+
     if (s.showGrid) drawGrid(ctx, w, h)
     drawVignette(ctx, w, h, s.focusBox.active ? (hero ? 0.9 : 0.7) : 0.2)
     drawHorizonGuide(ctx, s.horizonCurrent, w, h)
     drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
     drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
-    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
+    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, safeH)
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
-    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, h)
+    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, safeH)
     drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
 
     if (hero) {

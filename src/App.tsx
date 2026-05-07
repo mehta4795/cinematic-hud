@@ -100,7 +100,7 @@ export default function App() {
         {!isElectron && (
           <button
             onClick={phoneMode ? disablePhoneCamera : enablePhoneCamera}
-            className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20
+            className="absolute bottom-44 left-1/2 -translate-x-1/2 z-20
                        px-3 py-1 rounded-full text-xs font-mono
                        bg-black/60 border border-white/30 text-white/70
                        active:scale-95 transition-transform"
@@ -112,7 +112,7 @@ export default function App() {
         {phoneMode && (
           <button
             onClick={flipCamera}
-            className="absolute bottom-28 right-4 z-20
+            className="absolute bottom-44 right-4 z-20
                        w-10 h-10 rounded-full
                        bg-black/60 border border-white/30 text-white/80 text-lg
                        flex items-center justify-center

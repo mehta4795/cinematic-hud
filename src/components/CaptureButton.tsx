@@ -43,7 +43,7 @@ export function CaptureButton({ onCapture }: Props) {
       )}
       <button
         onClick={handleCapture}
-        className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20
+        className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20
                    w-16 h-16 rounded-full
                    bg-white/10 border-4 border-white
                    flex items-center justify-center
