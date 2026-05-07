@@ -20,6 +20,6 @@ def classify(subjects: list[dict], faces: list[dict]) -> str:
         return "portrait"
 
     if n_subjects == 0:
-        return "landscape"
+        return "general"
 
     return "general"

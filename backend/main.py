@@ -38,6 +38,19 @@ from intelligence.scoring_engine import compute as compute_scores
 from intelligence.guidance_engine import GuidanceEngine
 from intelligence.auto_capture import AutoCapture
 
+
+def crop_9_16(frame):
+    h, w = frame.shape[:2]
+    target_w = int(h * 9 / 16)
+    if target_w < w:
+        x = (w - target_w) // 2
+        return frame[:, x:x + target_w]
+    target_h = int(w * 16 / 9)
+    if target_h < h:
+        y = (h - target_h) // 2
+        return frame[y:y + target_h, :]
+    return frame
+
 # ── Config ────────────────────────────────────────────────────────────────
 CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
 TARGET_FPS = 4
@@ -78,8 +91,8 @@ async def vision_loop(camera_index: int) -> None:
         print("         Or:  python main.py --list-cameras")
         return
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1080)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1920)
     print(f"[vision] ✓ Camera {camera_index} opened. Running at {TARGET_FPS} FPS.")
 
     frame_count = 0
@@ -93,14 +106,19 @@ async def vision_loop(camera_index: int) -> None:
             await asyncio.sleep(0.1)
             continue
 
-        small = cv2.resize(frame, (INFERENCE_SIZE, INFERENCE_SIZE))
+        small = cv2.resize(crop_9_16(frame), (INFERENCE_SIZE, INFERENCE_SIZE))
 
-        subjects, faces, horizon = await asyncio.gather(
-            asyncio.to_thread(person_det.detect, small),
-            asyncio.to_thread(face_det.detect, small),
-            asyncio.to_thread(horizon_det.detect, small),
-        )
-        lighting = await asyncio.to_thread(lighting_analyzer.analyze, small, faces)
+        try:
+            subjects, horizon = await asyncio.gather(
+                asyncio.to_thread(person_det.detect, small),
+                asyncio.to_thread(horizon_det.detect, small),
+            )
+            faces   = await asyncio.to_thread(face_det.detect, small)
+            lighting = await asyncio.to_thread(lighting_analyzer.analyze, small, faces)
+        except Exception as exc:
+            print(f"[vision] detection error: {exc}")
+            await asyncio.sleep(interval)
+            continue
 
         # ── Intelligence layer ────────────────────────────────────────────
         scene_type   = classify(subjects, faces)
@@ -124,7 +142,7 @@ async def vision_loop(camera_index: int) -> None:
 
         if capture["should_capture"]:
             filename = CAPTURE_DIR / f"capture_{int(time.time()*1000)}.jpg"
-            await asyncio.to_thread(cv2.imwrite, str(filename), frame)
+            await asyncio.to_thread(cv2.imwrite, str(filename), crop_9_16(frame))
             print(f"[capture] saved {filename}")
 
         await broadcast({

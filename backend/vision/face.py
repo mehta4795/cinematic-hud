@@ -1,13 +1,21 @@
 from __future__ import annotations
-
+import pathlib
 import cv2
+import mediapipe as mp
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
+
+_MODEL_PATH = str(pathlib.Path(__file__).parent.parent / "models" / "blaze_face_short_range.tflite")
 
 
 class FaceDetector:
     def __init__(self) -> None:
-        # Haar cascade is bundled with opencv-python — no extra downloads
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        self.cascade = cv2.CascadeClassifier(cascade_path)
+        base_options = mp_python.BaseOptions(model_asset_path=_MODEL_PATH)
+        options = mp_vision.FaceDetectorOptions(
+            base_options=base_options,
+            min_detection_confidence=0.4,
+        )
+        self._detector = mp_vision.FaceDetector.create_from_options(options)
 
     def detect(self, frame) -> list[dict]:
         """
@@ -15,25 +23,20 @@ class FaceDetector:
         x,y = top-left corner, w,h = size, all in 0-1 range.
         """
         h, w = frame.shape[:2]
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        result = self._detector.detect(mp_image)
 
-        faces = self.cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30),
-        )
+        if not result.detections:
+            return []
 
-        result: list[dict] = []
-        if len(faces) > 0:
-            for fx, fy, fw, fh in faces:
-                result.append(
-                    {
-                        "x": float(fx) / w,
-                        "y": float(fy) / h,
-                        "w": float(fw) / w,
-                        "h": float(fh) / h,
-                    }
-                )
-
-        return result[:2]
+        out: list[dict] = []
+        for det in result.detections[:2]:
+            bb = det.bounding_box
+            out.append({
+                "x": float(bb.origin_x) / w,
+                "y": float(bb.origin_y) / h,
+                "w": float(bb.width)    / w,
+                "h": float(bb.height)   / h,
+            })
+        return out

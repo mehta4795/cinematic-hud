@@ -67,7 +67,7 @@ export function PhotoReview({ dataUrl, onDismiss }: Props) {
     >
       <img
         src={dataUrl}
-        className="w-full h-full object-cover select-none pointer-events-none"
+        className="w-full h-full object-contain select-none pointer-events-none"
         draggable={false}
       />
       <div className="absolute top-6 inset-x-0 text-center">

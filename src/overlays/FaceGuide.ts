@@ -22,15 +22,15 @@ export function drawFaceGuides(
     ctx.shadowColor = 'rgba(255, 220, 0, 0.3)'
     ctx.shadowBlur = 4
     ctx.beginPath()
-    ctx.ellipse(fx, fy, fw * 0.55, fh * 0.65, 0, 0, Math.PI * 2)
+    ctx.ellipse(fx, fy, fw * 0.42, fh * 0.72, 0, 0, Math.PI * 2)
     ctx.stroke()
 
     // Eye-line guide
     ctx.setLineDash([3, 5])
     ctx.globalAlpha = 0.35
     ctx.beginPath()
-    ctx.moveTo(fx - fw * 0.9, fy - fh * 0.1)
-    ctx.lineTo(fx + fw * 0.9, fy - fh * 0.1)
+    ctx.moveTo(fx - fw * 0.7, fy - fh * 0.1)
+    ctx.lineTo(fx + fw * 0.7, fy - fh * 0.1)
     ctx.stroke()
     ctx.setLineDash([])
     ctx.globalAlpha = 1

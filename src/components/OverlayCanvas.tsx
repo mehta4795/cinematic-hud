@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef } from 'react'
 import { useAnimationFrame } from '../hooks/useAnimationFrame'
 import type { OverlayState } from '../types/overlay'
 import { lerpVec2, lerp } from '../types/overlay'
@@ -14,29 +14,13 @@ import { drawVignette } from '../overlays/Vignette'
 import { drawCinematicBars } from '../overlays/CinematicBars'
 import { drawCaptureSuccess } from '../overlays/CaptureSuccess'
 import { drawLightingIndicator } from '../overlays/LightingIndicator'
+import { captureFrame } from '../utils/captureFrame'
 import { useVisionSocket } from '../websocket/useVisionSocket'
 import {
   playSubjectLock,
   playCapturePulse,
   playShutter,
-  playHeroActivate,
-  playHeroDeactivate,
 } from '../audio/sounds'
-
-// Base constants — Hero Mode overrides these
-const ZOOM_BASE   = 1.05
-const ZOOM_ACTIVE = 1.15
-const ZOOM_HIGH   = 1.22
-const MAX_SHIFT_X = 32
-const MAX_SHIFT_Y = 70
-
-// Hero Mode overrides
-const HERO_ZOOM_ACTIVE = 1.22
-const HERO_ZOOM_HIGH   = 1.35
-const HERO_MAX_SHIFT_X = 48
-const HERO_MAX_SHIFT_Y = 100
-const HERO_REFRAME_T   = 0.025   // faster reframing
-const HERO_SCORE_GATE  = 80      // fires auto-capture more easily
 
 const INITIAL_STATE: OverlayState = {
   focusBox: {
@@ -69,8 +53,8 @@ const INITIAL_STATE: OverlayState = {
   reframeY: 0,
   reframeTargetX: 0,
   reframeTargetY: 0,
-  zoomLevel: ZOOM_BASE,
-  zoomTarget: ZOOM_BASE,
+  zoomLevel: 1.0,
+  zoomTarget: 1.0,
   captureSuccessOpacity: 0,
   captureCount: 0,
   lighting: {
@@ -90,7 +74,6 @@ interface Props {
 export function OverlayCanvas({ onCapture, isReviewing }: Props) {
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const stateRef   = useRef<OverlayState>(structuredClone(INITIAL_STATE))
-  const heroRef    = useRef(false)
   const prevRef    = useRef({ focusActive: false, captureReady: false })
   const onCaptureRef = useRef(onCapture)
   onCaptureRef.current = onCapture
@@ -98,18 +81,6 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
   isReviewingRef.current = isReviewing
 
   useVisionSocket(stateRef)
-
-  // Hero Mode — press H to toggle
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key.toLowerCase() !== 'h') return
-      heroRef.current = !heroRef.current
-      if (heroRef.current) playHeroActivate()
-      else playHeroDeactivate()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   useAnimationFrame(delta => {
     const canvas = canvasRef.current
@@ -132,14 +103,13 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-    const s    = stateRef.current
-    const hero = heroRef.current
+    const s = stateRef.current
     s.timestamp += delta
 
     // ── Focus box ────────────────────────────────────────────────────────
     if (s.focusBox.active) {
-      s.focusBox.current = lerpVec2(s.focusBox.current, s.focusBox.target, 0.08)
-      s.focusBox.currentSize = lerp(s.focusBox.currentSize, s.focusBox.targetSize, 0.08)
+      s.focusBox.current = lerpVec2(s.focusBox.current, s.focusBox.target, 0.15)
+      s.focusBox.currentSize = lerp(s.focusBox.currentSize, s.focusBox.targetSize, 0.15)
     } else {
       const drift = 0.015 * Math.sin(s.timestamp * 0.0004)
       s.focusBox.target  = { x: 0.5 + drift, y: 0.44 + drift * 0.4 }
@@ -188,11 +158,7 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
       if (!isReviewingRef.current) {
         const video = canvas.parentElement?.querySelector('video') as HTMLVideoElement | null
         if (video && video.videoWidth > 0) {
-          const snap = document.createElement('canvas')
-          snap.width = video.videoWidth
-          snap.height = video.videoHeight
-          snap.getContext('2d')!.drawImage(video, 0, 0)
-          const dataUrl = snap.toDataURL('image/jpeg', 0.95)
+          const dataUrl = captureFrame(video)
           window.api.saveCapture(dataUrl)
           onCaptureRef.current(dataUrl)
         }
@@ -216,77 +182,50 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
     prevRef.current.focusActive  = s.focusBox.active
     prevRef.current.captureReady = s.captureReady
 
-    // ── Smart Reframing ───────────────────────────────────────────────────
-    const maxX = hero ? HERO_MAX_SHIFT_X : MAX_SHIFT_X
-    const maxY = hero ? HERO_MAX_SHIFT_Y : MAX_SHIFT_Y
-    const reframeT = hero ? HERO_REFRAME_T : 0.012
-
-    if (s.focusBox.active) {
-      const idealX = w * (s.sceneType === 'landscape' ? 0.5 : 0.36)
-      const idealY = h * 0.38
-      const subjectX = s.focusBox.current.x * w
-      const subjectY = s.focusBox.current.y * h
-      s.reframeTargetX = Math.max(-maxX, Math.min(maxX, idealX - subjectX))
-      s.reframeTargetY = Math.max(-maxY, Math.min(maxY, idealY - subjectY))
-    } else {
-      s.reframeTargetX = 0
-      s.reframeTargetY = 0
-    }
-    s.reframeX = lerp(s.reframeX, s.reframeTargetX, reframeT)
-    s.reframeY = lerp(s.reframeY, s.reframeTargetY, reframeT)
-
-    // ── Cinematic zoom ────────────────────────────────────────────────────
-    const zoomActive = hero ? HERO_ZOOM_ACTIVE : ZOOM_ACTIVE
-    const zoomHigh   = hero ? HERO_ZOOM_HIGH   : ZOOM_HIGH
-    const scoreGate  = hero ? HERO_SCORE_GATE  : 80
-
-    s.zoomTarget = s.focusBox.active
-      ? (s.scoreCurrent >= scoreGate ? zoomHigh : zoomActive)
-      : ZOOM_BASE
-    s.zoomLevel = lerp(s.zoomLevel, s.zoomTarget, 0.0008)
-
     const video = canvas.parentElement?.querySelector('video') as HTMLVideoElement | null
-    if (video) {
-      video.style.transform = `translate(${s.reframeX}px, ${s.reframeY}px) scale(${s.zoomLevel})`
-      video.style.transformOrigin = 'center center'
+
+    // ── Video display area (object-contain letterbox) ─────────────────────
+    const videoAspect = (video && video.videoWidth > 0)
+      ? video.videoWidth / video.videoHeight
+      : 9 / 16
+    const containerAspect = w / h
+
+    let vidX = 0, vidY = 0, vidW = w, vidH = h
+    if (videoAspect < containerAspect) {
+      vidW = h * videoAspect
+      vidX = (w - vidW) / 2
+    } else if (videoAspect > containerAspect) {
+      vidH = w / videoAspect
+      vidY = (h - vidH) / 2
     }
 
     // ── Draw ──────────────────────────────────────────────────────────────
     ctx.clearRect(0, 0, w, h)
 
-    if (s.showGrid) drawGrid(ctx, w, h)
-    drawVignette(ctx, w, h, s.focusBox.active ? (hero ? 0.9 : 0.7) : 0.2)
-    drawHorizonGuide(ctx, s.horizonCurrent, w, h)
-    drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
+    ctx.save()
+    ctx.translate(vidX, vidY)
+
+    if (s.showGrid) drawGrid(ctx, vidW, vidH)
+    drawVignette(ctx, vidW, vidH, s.focusBox.active ? 0.7 : 0.2)
+    drawHorizonGuide(ctx, s.horizonCurrent, vidW, vidH)
+    drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, vidW, vidH)
     drawFocusBox(
       ctx,
-      { x: s.focusBox.current.x * w, y: s.focusBox.current.y * h },
+      { x: s.focusBox.current.x * vidW, y: s.focusBox.current.y * vidH },
       s.focusBox.currentSize,
       s.timestamp,
       s.scoreCurrent,
       s.focusBox.active,
     )
-    drawFaceGuides(ctx, s.faces, w, h)
-    drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
-    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
-    drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
-    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, h)
-    drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
+    drawFaceGuides(ctx, s.faces, vidW, vidH)
+    drawHudText(ctx, s.hudText.text, s.hudText.opacity, vidW, vidH)
+    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, vidW, vidH)
+    drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, vidW, vidH)
+    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, vidW, vidH)
+    drawCinematicBars(ctx, vidW, vidH, s.sceneType === 'landscape' ? 0.85 : 0)
+    drawCaptureFlash(ctx, s.captureFlash, vidW, vidH)
 
-    // Hero Mode badge
-    if (hero) {
-      ctx.save()
-      ctx.textBaseline = 'top'
-      ctx.textAlign = 'left'
-      ctx.fillStyle = 'rgba(0, 255, 120, 0.9)'
-      ctx.shadowColor = 'rgba(0, 255, 120, 0.5)'
-      ctx.shadowBlur = 8
-      ctx.font = '700 8px "SF Mono", "Courier New", monospace'
-      ctx.fillText('◈ HERO MODE', 14, 14)
-      ctx.restore()
-    }
-
-    drawCaptureFlash(ctx, s.captureFlash, w, h)
+    ctx.restore()
   })
 
   return (

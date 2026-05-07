@@ -20,18 +20,14 @@ class LightingAnalyzer:
         h, w = gray.shape
         total_pixels = h * w
 
-        # ── Histogram ────────────────────────────────────────────────────────
+        # ── Histogram (whole-frame fallback) ─────────────────────────────────
         hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).flatten()
         mean_brightness = float(np.sum(hist * np.arange(256)) / total_pixels)
         clipped_dark  = float(np.sum(hist[:10])  / total_pixels)
         clipped_light = float(np.sum(hist[245:]) / total_pixels)
 
-        if mean_brightness < 80 or clipped_dark > 0.30:
-            exposure = "underexposed"
-        elif mean_brightness > 175 or clipped_light > 0.15:
-            exposure = "overexposed"
-        else:
-            exposure = "good"
+        # exposure is set below — after face ROI is known
+        exposure = "good"
 
         # ── Dynamic range (5th–95th percentile spread) ───────────────────────
         cumsum = np.cumsum(hist) / total_pixels
@@ -63,10 +59,21 @@ class LightingAnalyzer:
                 face_mean = float(np.mean(face_roi))
                 face_brightness = round(face_mean / 255.0, 2)
 
+                if face_mean < 85:
+                    exposure = "underexposed"
+                elif face_mean > 195:
+                    exposure = "overexposed"
+                else:
+                    exposure = "good"
+
                 bg_mean = float(np.mean(gray))
                 backlit = bg_mean > 0 and (bg_mean / max(face_mean, 1.0)) > 1.8
-
                 harsh_shadow = float(np.std(face_roi)) > 55
+        else:
+            if mean_brightness < 80 or clipped_dark > 0.30:
+                exposure = "underexposed"
+            elif mean_brightness > 175 or clipped_light > 0.15:
+                exposure = "overexposed"
 
         return {
             "exposure":        exposure,

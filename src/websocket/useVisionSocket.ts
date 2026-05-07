@@ -63,8 +63,11 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
         // Subject tracking
         if (msg.subjects.length > 0) {
           const sub = msg.subjects[0]
-          s.focusBox.target = { x: sub.x + sub.w / 2, y: sub.y + sub.h / 2 }
-          s.focusBox.targetSize = Math.max(sub.w, sub.h) * 390
+          const cx = sub.x + sub.w / 2
+          const cy = sub.y + sub.h / 2
+          s.focusBox.target  = { x: cx, y: cy }
+          s.focusBox.current = { x: cx, y: cy }
+          s.focusBox.targetSize = Math.max(sub.w, sub.h) * 260
           s.focusBox.active = true
           s.hudText.text = 'SUBJECT LOCKED'
           s.hudText.visible = true

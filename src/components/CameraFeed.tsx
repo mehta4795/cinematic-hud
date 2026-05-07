@@ -11,8 +11,8 @@ export function CameraFeed({ deviceId }: Props) {
     let stream: MediaStream | null = null
 
     const videoConstraint = deviceId
-      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      : { width: { ideal: 1920 }, height: { ideal: 1080 } }
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1080 }, height: { ideal: 1920 }, aspectRatio: { ideal: 9 / 16 } }
+      : { width: { ideal: 1080 }, height: { ideal: 1920 }, aspectRatio: { ideal: 9 / 16 } }
 
     navigator.mediaDevices
       .getUserMedia({ video: videoConstraint, audio: false })
@@ -33,7 +33,7 @@ export function CameraFeed({ deviceId }: Props) {
       autoPlay
       muted
       playsInline
-      className="w-full h-full object-cover"
+      className="w-full h-full object-contain"
     />
   )
 }

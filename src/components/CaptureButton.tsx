@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { captureFrame } from '../utils/captureFrame'
 
 interface Props {
   onCapture: (dataUrl: string) => void
@@ -11,11 +12,7 @@ export function CaptureButton({ onCapture }: Props) {
     const video = document.querySelector('video')
     if (!video) return
 
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    canvas.getContext('2d')!.drawImage(video, 0, 0)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+    const dataUrl = captureFrame(video)
 
     setFlash(true)
     setTimeout(() => setFlash(false), 150)
