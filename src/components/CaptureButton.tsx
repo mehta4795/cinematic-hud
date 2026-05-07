@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
-import { captureFrame } from '../utils/captureFrame'
+import { getFrame } from '../websocket/frameStore'
+import { BACKEND_HTTP } from '../config/backend'
 
 interface Props {
   onCapture: (dataUrl: string) => void
@@ -8,17 +9,31 @@ interface Props {
 export function CaptureButton({ onCapture }: Props) {
   const [flash, setFlash] = useState(false)
 
-  const handleCapture = useCallback(() => {
-    const video = document.querySelector('video')
-    if (!video) return
+  const handleCapture = useCallback(async () => {
+    const blob = getFrame()
+    if (!blob) return
 
-    const dataUrl = captureFrame(video)
+    const bmp = await createImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = bmp.width
+    canvas.height = bmp.height
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0)
+    bmp.close()
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
 
     setFlash(true)
     setTimeout(() => setFlash(false), 150)
 
     onCapture(dataUrl)
-    window.api.saveCapture(dataUrl)
+    if (window.api) {
+      await window.api.saveCapture(dataUrl)
+    } else {
+      await fetch(`${BACKEND_HTTP()}/save-capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl }),
+      }).catch(() => {})
+    }
   }, [onCapture])
 
   return (

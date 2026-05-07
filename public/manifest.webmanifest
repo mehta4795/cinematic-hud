@@ -1,0 +1,18 @@
+{
+  "name": "Cinematic HUD",
+  "short_name": "HUD",
+  "description": "AI-powered cinematic viewfinder",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/hero.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

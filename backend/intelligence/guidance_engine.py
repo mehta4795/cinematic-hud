@@ -4,14 +4,14 @@ from __future__ import annotations
 _ISSUE_COACHING: dict[str, str] = {
     "no_headroom":        "Lower camera slightly",
     "tight_headroom":     "Lower camera slightly",
-    "excessive_headroom": "Move camera up",
+    "excessive_headroom": "Step back or raise camera",
     "subject_off_center": "Shift subject toward thirds",
     "subject_off_frame":  "Re-center your subject",
     "subject_too_far":    "Move closer to subject",
     "move_closer":        "Step slightly closer",
-    "too_close":          "Step back slightly",
-    "face_too_low":       "Tilt camera down",
-    "face_too_high":      "Tilt camera up",
+    "too_close":          "Step back — camera too close",
+    "camera_too_low":     "Raise camera above eye level",
+    "face_too_low":       "Lower camera — too much space above",
     "no_face_detected":   "Center subject in frame",
     "no_subject":         "Point camera at subject",
     "backlit":             "Move away from background light",
@@ -23,6 +23,7 @@ _ISSUE_COACHING: dict[str, str] = {
     "out_of_frame":        "Step back to fit in frame",
     "head_tilted":         "Level your head",
     "not_facing_camera":   "Face the camera",
+    "bottom_dead_space":  "Too much empty space at the bottom",
 }
 
 # ── High-score cinematic affirmations (by scene type) ─────────────────────

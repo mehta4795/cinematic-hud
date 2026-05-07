@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useAnimationFrame } from '../hooks/useAnimationFrame'
 import type { OverlayState } from '../types/overlay'
 import { lerpVec2, lerp } from '../types/overlay'
@@ -10,18 +10,35 @@ import { drawFaceGuides } from '../overlays/FaceGuide'
 import { drawScoreDisplay } from '../overlays/ScoreDisplay'
 import { drawAutoCaptureIndicator } from '../overlays/AutoCaptureIndicator'
 import { drawCaptureFlash } from '../overlays/CaptureFlash'
+import { drawClaudeAnalysis } from '../overlays/ClaudeAnalysis'
 import { drawVignette } from '../overlays/Vignette'
 import { drawCinematicBars } from '../overlays/CinematicBars'
 import { drawCaptureSuccess } from '../overlays/CaptureSuccess'
 import { drawLightingIndicator } from '../overlays/LightingIndicator'
 import { drawPoseGuide } from '../overlays/PoseGuide'
-import { captureFrame } from '../utils/captureFrame'
+import { getFrame } from '../websocket/frameStore'
 import { useVisionSocket } from '../websocket/useVisionSocket'
+import { usePhoneCameraSocket } from '../websocket/usePhoneCameraSocket'
 import {
   playSubjectLock,
   playCapturePulse,
   playShutter,
 } from '../audio/sounds'
+
+// Base constants — Hero Mode overrides these
+const ZOOM_BASE   = 1.0
+const ZOOM_ACTIVE = 1.15
+const ZOOM_HIGH   = 1.22
+const MAX_SHIFT_X = 32
+const MAX_SHIFT_Y = 70
+
+// Hero Mode overrides
+const HERO_ZOOM_ACTIVE = 1.22
+const HERO_ZOOM_HIGH   = 1.35
+const HERO_MAX_SHIFT_X = 48
+const HERO_MAX_SHIFT_Y = 100
+const HERO_REFRAME_T   = 0.025
+const HERO_SCORE_GATE  = 80
 
 const INITIAL_STATE: OverlayState = {
   focusBox: {
@@ -58,6 +75,7 @@ const INITIAL_STATE: OverlayState = {
   zoomTarget: 1.0,
   captureSuccessOpacity: 0,
   captureCount: 0,
+<<<<<<< HEAD
   lighting: {
     exposure: 'good' as const,
     faceBrightness: 0.5,
@@ -68,14 +86,19 @@ const INITIAL_STATE: OverlayState = {
   poseLandmarks: [],
   poseType: 'general',
   poseIssues: [],
+  claudeAnalysis: null,
+  claudeAnalysisOpacity: 0,
+  claudeAnalysisAge: 0,
 }
 
 interface Props {
   onCapture: (dataUrl: string) => void
   isReviewing: boolean
+  phoneMode?: boolean
+  stream?: MediaStream | null
 }
 
-export function OverlayCanvas({ onCapture, isReviewing }: Props) {
+export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, stream = null }: Props) {
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const stateRef   = useRef<OverlayState>(structuredClone(INITIAL_STATE))
   const prevRef    = useRef({ focusActive: false, captureReady: false })
@@ -83,8 +106,24 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
   onCaptureRef.current = onCapture
   const isReviewingRef = useRef(isReviewing)
   isReviewingRef.current = isReviewing
+  const frameRef   = useRef<ImageBitmap | null>(null)
+  const [hero, setHero] = useState(false)
 
-  useVisionSocket(stateRef)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'h') return
+      setHero(h => !h)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useVisionSocket(stateRef, phoneMode ? undefined : (bmp) => {
+    frameRef.current?.close()
+    frameRef.current = bmp
+  }, !phoneMode)
+
+  usePhoneCameraSocket(stateRef, stream, phoneMode)
 
   useAnimationFrame(delta => {
     const canvas = canvasRef.current
@@ -156,6 +195,25 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
       s.guidanceOpacity = Math.max(0, s.guidanceOpacity - delta * 0.002)
     }
 
+    // ── Claude analysis lifecycle ─────────────────────────────────────────
+    if (s.claudeAnalysis) {
+      s.claudeAnalysisAge += delta
+      const SHOW_MS = 9000
+      const FADE_IN = 400
+      const FADE_OUT = 1200
+      if (s.claudeAnalysisAge < FADE_IN) {
+        s.claudeAnalysisOpacity = s.claudeAnalysisAge / FADE_IN
+      } else if (s.claudeAnalysisAge < SHOW_MS) {
+        s.claudeAnalysisOpacity = 1
+      } else if (s.claudeAnalysisAge < SHOW_MS + FADE_OUT) {
+        s.claudeAnalysisOpacity = 1 - (s.claudeAnalysisAge - SHOW_MS) / FADE_OUT
+      } else {
+        s.claudeAnalysis = null
+        s.claudeAnalysisOpacity = 0
+        s.claudeAnalysisAge = 0
+      }
+    }
+
     // ── Capture flash decay ───────────────────────────────────────────────
     if (s.captureFlash > 0) {
       s.captureFlash = Math.max(0, s.captureFlash - delta * 0.004)
@@ -167,11 +225,17 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
       s.captureCount += 1
 
       if (!isReviewingRef.current) {
-        const video = canvas.parentElement?.querySelector('video') as HTMLVideoElement | null
-        if (video && video.videoWidth > 0) {
-          const dataUrl = captureFrame(video)
-          window.api.saveCapture(dataUrl)
-          onCaptureRef.current(dataUrl)
+        const blob = getFrame()
+        if (blob) {
+          createImageBitmap(blob).then(bmp => {
+            const cv = document.createElement('canvas')
+            cv.width = bmp.width; cv.height = bmp.height
+            cv.getContext('2d')!.drawImage(bmp, 0, 0)
+            bmp.close()
+            const dataUrl = cv.toDataURL('image/jpeg', 0.95)
+            window.api?.saveCapture(dataUrl)
+            onCaptureRef.current(dataUrl)
+          })
         }
       }
     }
@@ -193,51 +257,84 @@ export function OverlayCanvas({ onCapture, isReviewing }: Props) {
     prevRef.current.focusActive  = s.focusBox.active
     prevRef.current.captureReady = s.captureReady
 
-    const video = canvas.parentElement?.querySelector('video') as HTMLVideoElement | null
+    // ── Smart Reframing ───────────────────────────────────────────────────
+    const maxX = hero ? HERO_MAX_SHIFT_X : MAX_SHIFT_X
+    const maxY = hero ? HERO_MAX_SHIFT_Y : MAX_SHIFT_Y
+    const reframeT = hero ? HERO_REFRAME_T : 0.012
 
-    // ── Video display area (object-contain letterbox) ─────────────────────
-    const videoAspect = (video && video.videoWidth > 0)
-      ? video.videoWidth / video.videoHeight
-      : 9 / 16
-    const containerAspect = w / h
-
-    let vidX = 0, vidY = 0, vidW = w, vidH = h
-    if (videoAspect < containerAspect) {
-      vidW = h * videoAspect
-      vidX = (w - vidW) / 2
-    } else if (videoAspect > containerAspect) {
-      vidH = w / videoAspect
-      vidY = (h - vidH) / 2
+    if (s.focusBox.active) {
+      const idealX = w * (s.sceneType === 'landscape' ? 0.5 : 0.36)
+      const idealY = h * 0.38
+      const subjectX = s.focusBox.current.x * w
+      const subjectY = s.focusBox.current.y * h
+      s.reframeTargetX = Math.max(-maxX, Math.min(maxX, idealX - subjectX))
+      s.reframeTargetY = Math.max(-maxY, Math.min(maxY, idealY - subjectY))
+    } else {
+      s.reframeTargetX = 0
+      s.reframeTargetY = 0
     }
+    s.reframeX = lerp(s.reframeX, s.reframeTargetX, reframeT)
+    s.reframeY = lerp(s.reframeY, s.reframeTargetY, reframeT)
+
+    // ── Cinematic zoom ────────────────────────────────────────────────────
+    const zoomActive = hero ? HERO_ZOOM_ACTIVE : ZOOM_ACTIVE
+    const zoomHigh   = hero ? HERO_ZOOM_HIGH   : ZOOM_HIGH
+    const scoreGate  = hero ? HERO_SCORE_GATE  : 80
+
+    s.zoomTarget = s.focusBox.active
+      ? (s.scoreCurrent >= scoreGate ? zoomHigh : zoomActive)
+      : ZOOM_BASE
+    s.zoomLevel = lerp(s.zoomLevel, s.zoomTarget, 0.0008)
 
     // ── Draw ──────────────────────────────────────────────────────────────
     ctx.clearRect(0, 0, w, h)
 
+    // Video frame + tracking overlays share the zoom/reframe transform
     ctx.save()
-    ctx.translate(vidX, vidY)
-
-    if (s.showGrid) drawGrid(ctx, vidW, vidH)
-    drawVignette(ctx, vidW, vidH, s.focusBox.active ? 0.7 : 0.2)
-    drawHorizonGuide(ctx, s.horizonCurrent, vidW, vidH)
-    drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, vidW, vidH)
+    ctx.translate(w / 2 + s.reframeX, h / 2 + s.reframeY)
+    ctx.scale(s.zoomLevel, s.zoomLevel)
+    ctx.translate(-w / 2, -h / 2)
+    if (!phoneMode && frameRef.current) ctx.drawImage(frameRef.current, 0, 0, w, h)
     drawFocusBox(
       ctx,
-      { x: s.focusBox.current.x * vidW, y: s.focusBox.current.y * vidH },
+      { x: s.focusBox.current.x * w, y: s.focusBox.current.y * h },
       s.focusBox.currentSize,
       s.timestamp,
       s.scoreCurrent,
       s.focusBox.active,
     )
-    drawFaceGuides(ctx, s.faces, vidW, vidH)
-    if (s.faces.length > 0) drawPoseGuide(ctx, s.poseLandmarks, s.poseType, s.poseIssues, vidW, vidH)
-    drawHudText(ctx, s.hudText.text, s.hudText.opacity, vidW, vidH)
-    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, vidW, vidH)
-    drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, vidW, vidH)
-    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, vidW, vidH)
-    drawCinematicBars(ctx, vidW, vidH, s.sceneType === 'landscape' ? 0.85 : 0)
-    drawCaptureFlash(ctx, s.captureFlash, vidW, vidH)
-
+    drawFaceGuides(ctx, s.faces, w, h)
+    if (s.faces.length > 0) drawPoseGuide(ctx, s.poseLandmarks, s.poseType, s.poseIssues, w, h)
     ctx.restore()
+
+    // Fixed HUD overlays (no transform)
+    if (s.showGrid) drawGrid(ctx, w, h)
+    drawVignette(ctx, w, h, s.focusBox.active ? (hero ? 0.9 : 0.7) : 0.2)
+    drawHorizonGuide(ctx, s.horizonCurrent, w, h)
+    drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
+    drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
+    drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, h)
+    drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
+    if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, h)
+    drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
+
+    if (hero) {
+      ctx.save()
+      ctx.textBaseline = 'top'
+      ctx.textAlign = 'left'
+      ctx.fillStyle = 'rgba(0, 255, 120, 0.9)'
+      ctx.shadowColor = 'rgba(0, 255, 120, 0.5)'
+      ctx.shadowBlur = 8
+      ctx.font = '700 8px "SF Mono", "Courier New", monospace'
+      ctx.fillText('◈ HERO MODE', 14, 14)
+      ctx.restore()
+    }
+
+    if (s.claudeAnalysis && s.claudeAnalysisOpacity > 0) {
+      drawClaudeAnalysis(ctx, s.claudeAnalysis, s.claudeAnalysisOpacity, w, h)
+    }
+
+    drawCaptureFlash(ctx, s.captureFlash, w, h)
   })
 
   return (

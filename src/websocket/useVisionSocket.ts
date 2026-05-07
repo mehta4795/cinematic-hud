@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import type { OverlayState, ScoreBreakdown, LightingState, PoseLandmark } from '../types/overlay'
+import { setFrame } from './frameStore'
+import { BACKEND_WS } from '../config/backend'
 
 interface SubjectMsg {
   id: number; label: string
@@ -39,16 +41,23 @@ interface VisionFrame {
   pose_type?: string
 }
 
-const WS_URL = 'ws://localhost:8765/ws'
 const RECONNECT_DELAY_MS = 2000
 
-export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
+export function useVisionSocket(
+  stateRef: MutableRefObject<OverlayState>,
+  onFrame?: (bmp: ImageBitmap) => void,
+  active = true,
+) {
   const wsRef = useRef<WebSocket | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
+  const onFrameRef = useRef(onFrame)
+  onFrameRef.current = onFrame
 
   useEffect(() => {
+    if (!active) return
     function connect() {
-      const ws = new WebSocket(WS_URL)
+      const ws = new WebSocket(`${BACKEND_WS()}/ws`)
+      ws.binaryType = 'blob'
       wsRef.current = ws
 
       ws.onopen = () => {
@@ -57,12 +66,29 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
       }
 
       ws.onmessage = ({ data }) => {
-        let msg: VisionFrame
+        // Binary = JPEG frame streamed from backend camera
+        if (data instanceof Blob) {
+          setFrame(data)
+          createImageBitmap(data).then(bmp => onFrameRef.current?.(bmp))
+          return
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let msg: any
         try { msg = JSON.parse(data) } catch { return }
 
         const s = stateRef.current
 
-        // Subject tracking
+        if (msg.type === 'claude_analysis') {
+          s.claudeAnalysis = {
+            headline: msg.analysis.headline ?? '',
+            topTips: msg.analysis.top_tips ?? [],
+          }
+          s.claudeAnalysisAge = 0
+          s.claudeAnalysisOpacity = 0
+          return
+        }
+
         if (msg.subjects.length > 0) {
           const sub = msg.subjects[0]
           const cx = sub.x + sub.w / 2
@@ -78,19 +104,16 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
           s.hudText.text = 'SCANNING…'
         }
 
-        // Faces
         s.faces = msg.faces.map(f => {
           const cx = f.x + f.w / 2
           const cy = f.y + f.h / 2
           return { cx, cy, w: f.w, h: f.h, smoothCx: cx, smoothCy: cy }
         })
 
-        // Phase 2 fields
         s.horizonTarget = msg.horizon
         s.scoreTarget   = msg.scores?.overall ?? 50
         s.guidance      = msg.guidance ?? []
 
-        // Phase 3 fields
         s.sceneType        = msg.scene_type ?? 'general'
         s.scoreBreakdown   = msg.scores ? { ...s.scoreBreakdown, ...msg.scores } : s.scoreBreakdown
         s.captureReady     = msg.capture_ready ?? false
@@ -134,5 +157,5 @@ export function useVisionSocket(stateRef: MutableRefObject<OverlayState>) {
       clearTimeout(timerRef.current)
       wsRef.current?.close()
     }
-  }, [])
+  }, [active])
 }

@@ -37,19 +37,20 @@ def analyze(faces: list[dict], scene_type: str) -> dict:
     elif 0.08 <= face_area <= 0.28:
         strengths.append("ideal_face_size")
         score += 22
-    elif face_area > 0.38:
+    elif face_area > 0.32:
         issues.append("too_close")
         score -= 12
 
-    # ── Eye-line (ideal: face centered at 28-44% down) ─────────────────────
-    if 0.28 <= face_cy <= 0.44:
+    # ── Eye-line / camera angle ────────────────────────────────────────────
+    if 0.25 <= face_cy <= 0.48:
         strengths.append("good_eye_line")
         score += 16
-    elif face_cy > 0.62:
+    elif face_cy < 0.20:
+        # Camera below eye level — shoots upward, causes double chin / stout look
+        issues.append("camera_too_low")
+        score -= 18
+    elif face_cy > 0.60:
         issues.append("face_too_low")
-        score -= 10
-    elif face_cy < 0.18:
-        issues.append("face_too_high")
         score -= 10
 
     return {
