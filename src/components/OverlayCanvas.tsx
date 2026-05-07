@@ -4,7 +4,6 @@ import type { OverlayState } from '../types/overlay'
 import { lerpVec2, lerp } from '../types/overlay'
 import { drawGrid } from '../overlays/GridOverlay'
 import { drawFocusBox } from '../overlays/FocusBox'
-import { drawHudText } from '../overlays/HudText'
 import { drawHorizonGuide } from '../overlays/HorizonGuide'
 import { drawFaceGuides } from '../overlays/FaceGuide'
 import { drawScoreDisplay } from '../overlays/ScoreDisplay'
@@ -16,6 +15,9 @@ import { drawCinematicBars } from '../overlays/CinematicBars'
 import { drawCaptureSuccess } from '../overlays/CaptureSuccess'
 import { drawLightingIndicator } from '../overlays/LightingIndicator'
 import { drawPoseGuide } from '../overlays/PoseGuide'
+import { drawAiStatus } from '../overlays/AiStatus'
+import { drawExpressionMeter } from '../overlays/ExpressionMeter'
+import { drawPoutCaptureRing } from '../overlays/PoutCaptureRing'
 import { getFrame } from '../websocket/frameStore'
 import { useVisionSocket } from '../websocket/useVisionSocket'
 import { usePhoneCameraSocket } from '../websocket/usePhoneCameraSocket'
@@ -64,6 +66,8 @@ const INITIAL_STATE: OverlayState = {
   poseLandmarks: [],
   poseType: 'general',
   poseIssues: [],
+  expression: null,
+  poutProgress: 0,
   claudeAnalysis: null,
   claudeAnalysisOpacity: 0,
   claudeAnalysisAge: 0,
@@ -248,12 +252,14 @@ export function OverlayCanvas({ onCapture, isReviewing, phoneMode = false, strea
 
     if (s.showGrid) drawGrid(ctx, w, h)
     drawVignette(ctx, w, h, s.focusBox.active ? 0.7 : 0.2)
-    drawHorizonGuide(ctx, s.horizonCurrent, w, h)
+    drawHorizonGuide(ctx, s.horizonCurrent, w, safeH)
     drawAutoCaptureIndicator(ctx, s.captureReady, s.captureCountdown, s.shouldCapture, s.timestamp, w, h)
-    drawHudText(ctx, s.hudText.text, s.hudText.opacity, w, h)
     drawScoreDisplay(ctx, s.scoreCurrent, s.guidanceText, s.guidanceOpacity, s.aiConnected, s.sceneType, s.bestScore, w, safeH)
     drawCaptureSuccess(ctx, s.captureSuccessOpacity, s.scoreCurrent, s.captureCount, w, h)
     if (s.aiConnected) drawLightingIndicator(ctx, s.lighting, w, safeH)
+    if (s.faces.length > 0) drawExpressionMeter(ctx, s.expression, w, safeH)
+    drawAiStatus(ctx, s.aiConnected, w, h)
+    drawPoutCaptureRing(ctx, s.poutProgress, w, h)
     drawCinematicBars(ctx, w, h, s.sceneType === 'landscape' ? 0.85 : 0)
 
     if (s.claudeAnalysis && s.claudeAnalysisOpacity > 0) {

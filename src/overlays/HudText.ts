@@ -9,12 +9,8 @@ export function drawHudText(
 
   ctx.save()
 
-  ctx.globalAlpha = opacity * 0.55
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'
-  ctx.font = '400 9px "SF Mono", "Courier New", monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'bottom'
-  ctx.fillText('AI TRACK', w / 2, h * 0.72 - 14)
 
   ctx.globalAlpha = opacity
   ctx.fillStyle = 'rgba(0, 220, 255, 0.9)'

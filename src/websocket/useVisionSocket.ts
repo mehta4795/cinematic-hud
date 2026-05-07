@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
-import type { OverlayState, ScoreBreakdown, LightingState, PoseLandmark } from '../types/overlay'
+import type { OverlayState, ScoreBreakdown, LightingState, PoseLandmark, ExpressionState } from '../types/overlay'
 import { setFrame } from './frameStore'
 import { BACKEND_WS } from '../config/backend'
 
@@ -39,6 +39,8 @@ interface VisionFrame {
   lighting?: LightingMsg
   pose_landmarks?: PoseLandmark[]
   pose_type?: string
+  expression?: ExpressionState
+  pout_progress?: number
 }
 
 const RECONNECT_DELAY_MS = 2000
@@ -142,6 +144,9 @@ export function useVisionSocket(
           'uneven_shoulders', 'leaning', 'out_of_frame', 'head_tilted', 'not_facing_camera',
         ])
         s.poseIssues = (msg.issues ?? []).filter((k: string) => POSE_ISSUE_KEYS.has(k))
+
+        s.expression   = msg.expression ?? null
+        s.poutProgress = msg.pout_progress ?? 0
       }
 
       ws.onclose = () => {

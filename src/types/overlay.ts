@@ -37,6 +37,14 @@ export interface LightingState {
   harshShadow: boolean
 }
 
+export interface ExpressionState {
+  smile: number   // 0..1 — average of mouthSmileLeft / mouthSmileRight
+  mouth: number   // 0..1 — jawOpen
+  eyes:  number   // 0..1 — 1 means eyes wide open, 0 means blink
+  brow:  number   // 0..1 — average of brow-up activations
+  pout:  number   // 0..1 — mouthPucker (lips pursed forward)
+}
+
 export interface OverlayState {
   focusBox: {
     target: Vec2
@@ -84,6 +92,10 @@ export interface OverlayState {
   poseLandmarks: PoseLandmark[]
   poseType: string
   poseIssues: string[]
+
+  // Phase 7 — Expression (FaceLandmarker blendshapes)
+  expression: ExpressionState | null
+  poutProgress: number   // 0..1 — held-pout shutter trigger progress
 
   // Claude analysis
   claudeAnalysis: { headline: string; topTips: string[] } | null

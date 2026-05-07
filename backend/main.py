@@ -200,6 +200,13 @@ async def vision_loop(start_index: int) -> None:
     claude_last_time = [0.0]
     face_history: deque = deque(maxlen=8)  # last 8 face center positions
 
+    # ── Pout-to-capture state ──────────────────────────────────────────────
+    POUT_THRESHOLD       = 0.45     # mouthPucker activation needed
+    POUT_HOLD_FRAMES     = 4        # ~1 sec at 4 FPS
+    POUT_COOLDOWN_FRAMES = 12       # ~3 sec lockout after firing
+    pout_streak   = 0
+    pout_cooldown = 0
+
     while True:
         t0 = time.monotonic()
 
@@ -246,7 +253,10 @@ async def vision_loop(start_index: int) -> None:
             if not faces:
                 subjects    = []
                 pose_lm     = []
-                head_orient = {"roll": 0.0, "yaw": 0.0}
+                head_orient = {
+                    "roll": 0.0, "yaw": 0.0,
+                    "expression": {"smile": 0.0, "mouth": 0.0, "eyes": 0.0, "brow": 0.0, "pout": 0.0},
+                }
             else:
                 pose_lm     = await asyncio.to_thread(pose_det.detect, small, faces[0])
                 head_orient = await asyncio.to_thread(facemesh_det.detect, small, True)
@@ -283,10 +293,28 @@ async def vision_loop(start_index: int) -> None:
         guidance = guidance_engine.generate(all_issues, all_strengths, scores, scene_type)
         capture  = auto_capture.update(scores, subjects, horizon)
 
-        if capture["should_capture"]:
+        # ── Pout-to-capture trigger ────────────────────────────────────────
+        pout_value = head_orient.get("expression", {}).get("pout", 0.0)
+        if pout_cooldown > 0:
+            pout_cooldown -= 1
+            pout_streak = 0
+        elif pout_value >= POUT_THRESHOLD and faces:
+            pout_streak += 1
+        else:
+            pout_streak = max(0, pout_streak - 1)
+
+        pout_progress = min(1.0, pout_streak / POUT_HOLD_FRAMES)
+        pout_should_capture = pout_streak >= POUT_HOLD_FRAMES
+        if pout_should_capture:
+            pout_streak = 0
+            pout_cooldown = POUT_COOLDOWN_FRAMES
+
+        should_capture = capture["should_capture"] or pout_should_capture
+        if should_capture:
             filename = CAPTURE_DIR / f"capture_{int(time.time()*1000)}.jpg"
             await asyncio.to_thread(cv2.imwrite, str(filename), portrait_frame)
-            print(f"[capture] saved {filename}")
+            tag = "pout" if pout_should_capture else "auto"
+            print(f"[capture:{tag}] saved {filename}")
 
         await broadcast({
             "frame":             frame_count,
@@ -299,12 +327,14 @@ async def vision_loop(start_index: int) -> None:
             "strengths":         all_strengths,
             "guidance":          [guidance] if guidance else [],
             "capture_ready":     capture["capture_ready"],
-            "should_capture":    capture["should_capture"],
+            "should_capture":    should_capture,
             "capture_countdown": capture["capture_countdown"],
             "best_score":        capture["best_score"],
             "lighting":          lighting,
             "pose_landmarks":    pose_lm,
             "pose_type":         pose["pose_type"],
+            "expression":        head_orient.get("expression", {"smile": 0.0, "mouth": 0.0, "eyes": 0.0, "brow": 0.0, "pout": 0.0}),
+            "pout_progress":     pout_progress,
         })
 
         # ── Claude live analysis — relaxed for testing: fires on any frame, 1s cooldown ─

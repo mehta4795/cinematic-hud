@@ -6,7 +6,8 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 from .model_utils import ensure_model
 
-_NO_FACE = {"roll": 0.0, "yaw": 0.0}
+_NO_EXPRESSION = {"smile": 0.0, "mouth": 0.0, "eyes": 0.0, "brow": 0.0, "pout": 0.0}
+_NO_FACE = {"roll": 0.0, "yaw": 0.0, "expression": _NO_EXPRESSION}
 
 
 class FaceMeshDetector:
@@ -23,15 +24,26 @@ class FaceMeshDetector:
             num_faces=1,
             min_face_detection_confidence=0.4,
             min_face_presence_confidence=0.4,
+            output_face_blendshapes=True,
         )
         self._detector = mp_vision.FaceLandmarker.create_from_options(options)
 
     def detect(self, frame, has_face: bool) -> dict:
         """
-        Returns head orientation angles in degrees.
-        {"roll": float, "yaw": float}
-        roll: head tilt left/right (0 = level, + = tilted right)
-        yaw:  head turn left/right (0 = facing camera, + = turned right)
+        Returns head orientation angles (degrees) plus four atomic expression
+        meters derived from blendshape coefficients.
+
+            {
+              "roll": float,        # head tilt left/right (0 = level)
+              "yaw":  float,        # head turn left/right (0 = facing camera)
+              "expression": {
+                "smile": 0..1,      # avg of mouthSmileLeft/Right
+                "mouth": 0..1,      # jawOpen
+                "eyes":  0..1,      # 1 - avg of eyeBlinkLeft/Right (1 = wide open)
+                "brow":  0..1,      # avg of browInnerUp + browOuterUpLeft/Right
+              }
+            }
+
         Skips inference when has_face=False.
         """
         if self._detector is None or not has_face:
@@ -59,7 +71,37 @@ class FaceMeshDetector:
         mid_x  = (l_chk.x + r_chk.x) / 2
         yaw    = ((nose.x - mid_x) / max(face_w, 0.01)) * 90.0  # scale to ≈ degrees
 
+        # ── Blendshape-derived expression meters ──────────────────────────
+        expression = _NO_EXPRESSION
+        if result.face_blendshapes:
+            shapes = {c.category_name: c.score for c in result.face_blendshapes[0]}
+
+            def avg(*keys: str) -> float:
+                vals = [shapes.get(k, 0.0) for k in keys]
+                return sum(vals) / len(vals) if vals else 0.0
+
+            def clamp01(x: float) -> float:
+                return max(0.0, min(1.0, x))
+
+            smile = clamp01(avg("mouthSmileLeft", "mouthSmileRight"))
+            mouth = clamp01(shapes.get("jawOpen", 0.0))
+            eyes  = clamp01(1.0 - avg("eyeBlinkLeft", "eyeBlinkRight"))
+            brow  = clamp01(avg("browInnerUp", "browOuterUpLeft", "browOuterUpRight"))
+            # Pout: lips pursed forward — the mouthPucker blendshape, with
+            # a small assist from mouthFunnel for "kiss face" expressions.
+            pout  = clamp01(0.7 * shapes.get("mouthPucker", 0.0)
+                            + 0.3 * shapes.get("mouthFunnel", 0.0))
+
+            expression = {
+                "smile": round(smile, 3),
+                "mouth": round(mouth, 3),
+                "eyes":  round(eyes,  3),
+                "brow":  round(brow,  3),
+                "pout":  round(pout,  3),
+            }
+
         return {
-            "roll": round(roll, 1),
-            "yaw":  round(yaw, 1),
+            "roll":       round(roll, 1),
+            "yaw":        round(yaw, 1),
+            "expression": expression,
         }

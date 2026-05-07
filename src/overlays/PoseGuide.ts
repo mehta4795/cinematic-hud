@@ -11,7 +11,17 @@ const POSE_LABELS: Record<string, string> = {
   sitting:  'SITTING',
   walking:  'WALKING',
   jumping:  'JUMPING',
-  general:  'POSE DETECTED',
+  general:  '',         // hide the big title for unclassified pose
+}
+
+// Distinct accent colour per pose type — bright, saturated palette so the
+// card pops at a glance rather than reading as a flat dull panel.
+const POSE_COLORS: Record<string, string> = {
+  standing: 'rgba(60, 235, 255,',    // electric cyan
+  sitting:  'rgba(220, 130, 255,',   // vivid purple
+  walking:  'rgba(80, 245, 130,',    // bright emerald
+  jumping:  'rgba(255, 100, 200,',   // vivid magenta
+  general:  'rgba(80, 235, 210,',    // vivid aqua-teal (was warm gold / dull yellow)
 }
 
 const ISSUE_LABELS: Record<string, string> = {
@@ -21,13 +31,16 @@ const ISSUE_LABELS: Record<string, string> = {
   not_facing_camera: 'LOOK AT CAMERA',
 }
 
+const amber = 'rgba(255, 180, 0,'
+const green = 'rgba(0, 230, 130,'
+
 export function drawPoseGuide(
   ctx: CanvasRenderingContext2D,
   landmarks: PoseLandmark[],
   poseType: string,
   poseIssues: string[],
   w: number,
-  h: number
+  h: number,
 ) {
   if (landmarks.length === 0) return
 
@@ -37,11 +50,7 @@ export function drawPoseGuide(
     y: (lm as any)._sy ?? lm.y,
   }]))
 
-  const amber = 'rgba(255, 180, 0,'
-  const cyan  = 'rgba(0, 220, 255,'
-  const green = 'rgba(0, 220, 120,'
-
-  // ── Shoulder tilt (computed live from landmarks) ───────────────────────────
+  // ── Shoulder tilt (computed live from landmarks) ───────────────────────
   const ls = byIdx.get(11)
   const rs = byIdx.get(12)
   let shoulderTiltDeg = 0
@@ -51,19 +60,18 @@ export function drawPoseGuide(
     shouldersVisible = true
     const lsx = ls.x * w, lsy = ls.y * h
     const rsx = rs.x * w, rsy = rs.y * h
-    // Use absolute dx/dy so the sign of (rsx - lsx) doesn't matter —
-    // landmark 11 can appear on either side depending on camera mirroring.
     const dx = Math.abs(rsx - lsx)
     const dy = Math.abs(rsy - lsy)
     shoulderTiltDeg = dx > 1 ? Math.atan2(dy, dx) * 180 / Math.PI : 0
   }
 
-  const hasIssues = poseIssues.filter(k => k !== 'uneven_shoulders').length > 0
+  const otherIssues = poseIssues.filter(k => k !== 'uneven_shoulders').slice(0, 2)
+  const hasIssues = otherIssues.length > 0
     || (shouldersVisible && shoulderTiltDeg >= SHOULDER_MARKER_DEG)
 
   ctx.save()
 
-  // ── Body indicators ────────────────────────────────────────────────────────
+  // ── Body indicators ────────────────────────────────────────────────────
 
   // Shoulder tilt line — only above the higher threshold
   if (shouldersVisible && shoulderTiltDeg >= SHOULDER_MARKER_DEG) {
@@ -158,96 +166,149 @@ export function drawPoseGuide(
     }
   }
 
-  // ── Pose info card (top-left) ─────────────────────────────────────────────
-  const PAD_X  = 10
-  const PAD_Y  = 7
-  const CARD_X = 12
-  const CARD_Y = 12
-  const ROW_H  = 14
+  // ── Pose info card (top-left) — compact but readable ────────────────
+  const PAD_X      = 12
+  const PAD_Y      = 10
+  const CARD_X     = 12
+  const CARD_Y     = 12
+  const HEADER_H   = 12
+  const TITLE_H    = 22
+  const ROW_H      = 18
 
-  // Shoulder row always present when visible; other issues below
-  const otherIssues = poseIssues.filter(k => k !== 'uneven_shoulders').slice(0, 2)
-  const rowCount = (shouldersVisible ? 1 : 0) + otherIssues.length
-  const cardH = PAD_Y * 2 + 18 + (rowCount > 0 ? 4 + rowCount * ROW_H : 0)
-  const cardW = 152
+  // Title row only renders when we have a meaningful pose label.
+  const poseLabel = POSE_LABELS[poseType] ?? ''
+  const showTitle = poseLabel.length > 0
 
-  // Background
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.52)'
+  const rowCount   = (shouldersVisible ? 1 : 0) + otherIssues.length
+  const cardW      = 188
+  const cardH      = PAD_Y * 2 + HEADER_H +
+                     (showTitle ? 3 + TITLE_H : 0) +
+                     (rowCount > 0 ? 6 + rowCount * ROW_H : 0)
+
+  // Pick accent colour: red-amber when issues, else pose-type colour
+  const poseRgb   = POSE_COLORS[poseType] ?? POSE_COLORS.general
+  const accentRgb = hasIssues ? amber : poseRgb
+
+  // ── Translucent background — dark enough that the words pop, but you
+  //    can still see through to the video. Plus a faint accent tint.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
   ctx.beginPath()
-  ctx.roundRect(CARD_X, CARD_Y, cardW, cardH, 4)
+  ctx.roundRect(CARD_X, CARD_Y, cardW, cardH, 6)
   ctx.fill()
 
-  // Border — amber if any real issue, cyan otherwise
-  const borderColor = hasIssues ? `${amber}0.5)` : `${cyan}0.3)`
-  ctx.strokeStyle = borderColor
-  ctx.lineWidth = 0.75
+  ctx.fillStyle = `${accentRgb}0.08)`
   ctx.beginPath()
-  ctx.roundRect(CARD_X, CARD_Y, cardW, cardH, 4)
+  ctx.roundRect(CARD_X, CARD_Y, cardW, cardH, 6)
+  ctx.fill()
+
+  // ── Bold glowing border ──────────────────────────────────────────────
+  ctx.strokeStyle = `${accentRgb}0.95)`
+  ctx.lineWidth   = 2
+  ctx.shadowColor = `${accentRgb}0.75)`
+  ctx.shadowBlur  = 16
+  ctx.beginPath()
+  ctx.roundRect(CARD_X, CARD_Y, cardW, cardH, 6)
   ctx.stroke()
-
-  // Section label
-  ctx.font = `400 7px ${FONT}`
-  ctx.textBaseline = 'top'
-  ctx.textAlign = 'left'
-  ctx.fillStyle = hasIssues ? `${amber}0.5)` : `${cyan}0.3)`
-  ctx.fillText('POSE', CARD_X + PAD_X, CARD_Y + PAD_Y)
-
-  // Pose type
-  const poseLabel = POSE_LABELS[poseType] ?? 'POSE'
-  ctx.font = `600 10px ${FONT}`
-  ctx.fillStyle = hasIssues ? `${amber}0.92)` : `${cyan}0.88)`
-  ctx.shadowColor = hasIssues ? `${amber}0.45)` : `${cyan}0.4)`
-  ctx.shadowBlur = 6
-  ctx.fillText(poseLabel, CARD_X + PAD_X + 30, CARD_Y + PAD_Y)
   ctx.shadowBlur = 0
 
-  // Separator
+  // ── Vertical accent stripe on the left edge ──────────────────────────
+  ctx.fillStyle   = `${accentRgb}1)`
+  ctx.shadowColor = `${accentRgb}0.85)`
+  ctx.shadowBlur  = 12
+  ctx.beginPath()
+  ctx.roundRect(CARD_X + 1, CARD_Y + 6, 4, cardH - 12, 2)
+  ctx.fill()
+  ctx.shadowBlur = 0
+
+  // ── Header caption: status dot + "POSE" ──────────────────────────────
+  ctx.textBaseline = 'top'
+  ctx.textAlign    = 'left'
+
+  const dotX = CARD_X + PAD_X + 5
+  const dotY = CARD_Y + PAD_Y + 5
+  ctx.fillStyle   = `${accentRgb}1)`
+  ctx.shadowColor = `${accentRgb}0.9)`
+  ctx.shadowBlur  = 10
+  ctx.beginPath()
+  ctx.arc(dotX, dotY, 4, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.shadowBlur = 0
+
+  ctx.font = `800 10px ${FONT}`
+  ctx.fillStyle = `${accentRgb}1)`
+  ctx.shadowColor = `${accentRgb}0.7)`
+  ctx.shadowBlur  = 8
+  ctx.fillText('POSE', CARD_X + PAD_X + 14, CARD_Y + PAD_Y + 1)
+  ctx.shadowBlur = 0
+
+  // ── Big pose-type title (only when we have one to show) ─────────────
+  const titleY = CARD_Y + PAD_Y + HEADER_H + 4
+
+  if (showTitle) {
+    ctx.font = `800 17px ${FONT}`
+    ctx.fillStyle   = `${accentRgb}1)`
+    ctx.shadowColor = `${accentRgb}1)`
+    ctx.shadowBlur  = 18
+    ctx.fillText(poseLabel, CARD_X + PAD_X, titleY)
+    ctx.shadowBlur  = 10
+    ctx.fillText(poseLabel, CARD_X + PAD_X, titleY)
+    // Third pass for an extra-crisp top layer
+    ctx.shadowBlur  = 4
+    ctx.fillText(poseLabel, CARD_X + PAD_X, titleY)
+    ctx.shadowBlur  = 0
+  }
+
+  // ── Separator + rows ─────────────────────────────────────────────────
   if (rowCount > 0) {
-    const sepY = CARD_Y + PAD_Y + 18 + 2
-    ctx.strokeStyle = hasIssues ? `${amber}0.25)` : `${cyan}0.15)`
-    ctx.lineWidth = 0.5
+    const sepY = showTitle ? titleY + TITLE_H : CARD_Y + PAD_Y + HEADER_H + 4
+    ctx.strokeStyle = `${accentRgb}0.3)`
+    ctx.lineWidth = 0.75
     ctx.beginPath()
     ctx.moveTo(CARD_X + PAD_X, sepY)
     ctx.lineTo(CARD_X + cardW - PAD_X, sepY)
     ctx.stroke()
 
     let rowY = sepY + 6
-    ctx.font = `400 8px ${FONT}`
 
-    // Shoulder level row — always shown when shoulders visible
+    // Shoulder row — always shown when shoulders visible
     if (shouldersVisible) {
       const isShoulderIssue = poseIssues.includes('uneven_shoulders')
       const tiltStr = shoulderTiltDeg < 1.5
         ? 'LEVEL'
         : `${shoulderTiltDeg.toFixed(1)}°`
 
-      // Label
-      ctx.fillStyle = isShoulderIssue ? `${amber}0.6)` : `${cyan}0.45)`
+      // left label
+      ctx.font = `700 10px ${FONT}`
+      ctx.textAlign = 'left'
+      ctx.fillStyle   = isShoulderIssue ? `${amber}1)` : `${accentRgb}0.98)`
+      ctx.shadowColor = isShoulderIssue ? `${amber}0.6)` : `${accentRgb}0.55)`
+      ctx.shadowBlur  = 6
       ctx.fillText('SHOULDERS', CARD_X + PAD_X, rowY)
+      ctx.shadowBlur = 0
 
-      // Value — right-aligned inside card
-      const valX = CARD_X + cardW - PAD_X
+      // right value
+      const valRgb = isShoulderIssue
+        ? amber
+        : (shoulderTiltDeg < 1.5 ? green : amber)
+      ctx.font = `800 12px ${FONT}`
       ctx.textAlign = 'right'
-      if (isShoulderIssue) {
-        ctx.fillStyle = `${amber}0.92)`
-        ctx.shadowColor = `${amber}0.4)`
-        ctx.shadowBlur = 4
-      } else {
-        ctx.fillStyle = shoulderTiltDeg < 1.5 ? `${green}0.85)` : `${amber}0.7)`
-        ctx.shadowBlur = 0
-      }
-      ctx.fillText(tiltStr, valX, rowY)
+      ctx.fillStyle   = `${valRgb}0.98)`
+      ctx.shadowColor = `${valRgb}0.6)`
+      ctx.shadowBlur  = 7
+      ctx.fillText(tiltStr, CARD_X + cardW - PAD_X, rowY - 1)
       ctx.shadowBlur = 0
       ctx.textAlign = 'left'
+
       rowY += ROW_H
     }
 
-    // Other issues
+    // Other issue rows
     for (const issue of otherIssues) {
       const text = ISSUE_LABELS[issue] ?? issue.replace(/_/g, ' ').toUpperCase()
-      ctx.fillStyle = `${amber}0.88)`
-      ctx.shadowColor = `${amber}0.35)`
-      ctx.shadowBlur = 4
+      ctx.font = `800 11px ${FONT}`
+      ctx.fillStyle   = `${amber}1)`
+      ctx.shadowColor = `${amber}0.75)`
+      ctx.shadowBlur  = 9
       ctx.fillText(`› ${text}`, CARD_X + PAD_X, rowY)
       ctx.shadowBlur = 0
       rowY += ROW_H
